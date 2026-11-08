@@ -292,6 +292,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (r.id !== id) return r;
           const nextIndex = r.current_step_index + 1;
           const isDone = nextIndex >= r.steps.length;
+          if (isDone && r.googleTaskId) {
+            recordDeletedGoogleTaskId(r.googleTaskId);
+            const token = getStoredAccessToken();
+            if (token) {
+              markGoogleTaskCompleted(token, '@default', r.googleTaskId);
+            }
+          }
           return {
             ...r,
             current_step_index: nextIndex,
