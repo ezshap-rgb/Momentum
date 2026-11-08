@@ -11,6 +11,8 @@ import {
   Minimize2,
   LayoutGrid,
   Columns,
+  RefreshCw,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -19,8 +21,17 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceIngest }) => {
-  const { settings, toggleTheme, panelStates, setCalendarView, setPanelLevel, layoutMode, toggleLayoutMode } =
-    useMomentum();
+  const {
+    settings,
+    toggleTheme,
+    panelStates,
+    setCalendarView,
+    setPanelLevel,
+    layoutMode,
+    toggleLayoutMode,
+    isSyncingTasks,
+    syncGoogleTasks,
+  } = useMomentum();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
 
@@ -95,6 +106,49 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
 
         {/* Center / Right Action Controls */}
         <div className="flex items-center gap-1.5">
+          {/* Prominent Google Tasks Sync Button (Visible everywhere) */}
+          <button
+            onClick={async () => {
+              if (!settings.googleTasksConnected && !settings.googleTasksClientId) {
+                onOpenSettings();
+                return;
+              }
+              const res = await syncGoogleTasks();
+              if (res.success) {
+                if (res.count === 0) {
+                  alert(
+                    'Connected to Google Tasks, but 0 active tasks were found.\n\n' +
+                    'Try creating a task from your phone with Gemini (e.g. "@momentum Add a 5m job: Test"), then click Sync Tasks again!'
+                  );
+                } else {
+                  alert(`✓ Successfully synced ${res.count} task${res.count === 1 ? '' : 's'} into your cockpit!`);
+                }
+              } else if (res.error) {
+                alert(`Sync note: ${res.error}`);
+              }
+            }}
+            disabled={isSyncingTasks}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition shrink-0 ${
+              settings.googleTasksConnected
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                : 'bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+            }`}
+            title={
+              settings.googleTasksConnected
+                ? 'Sync Google Tasks from your phone'
+                : 'Connect Google Tasks'
+            }
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingTasks ? 'animate-spin' : ''}`} />
+            <span className="text-[11px] font-bold">
+              {isSyncingTasks
+                ? 'Syncing...'
+                : settings.googleTasksConnected
+                ? 'Sync Tasks'
+                : 'Connect Tasks'}
+            </span>
+          </button>
+
           {/* Quick Voice Ingest Pill */}
           <button
             onClick={onOpenVoiceIngest}

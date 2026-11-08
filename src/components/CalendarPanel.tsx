@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useMomentum } from '../context/MomentumContext';
+import { normalizeGoogleCalendarUrl } from '../services/storageService';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -9,18 +10,58 @@ import {
   Clock,
   X,
   Layers,
+  Link,
+  Check,
+  Settings as SettingsIcon,
+  Trash2,
 } from 'lucide-react';
 
 export const CalendarPanel: React.FC = () => {
-  const { boardData, settings, panelStates, setCalendarView, addCalendarEvent, deleteCalendarEvent } = useMomentum();
+  const {
+    boardData,
+    settings,
+    updateSettings,
+    panelStates,
+    setCalendarView,
+    addCalendarEvent,
+    deleteCalendarEvent,
+  } = useMomentum();
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventDate, setNewEventDate] = useState(new Date().toISOString().split('T')[0]);
   const [newEventTime, setNewEventTime] = useState('10:00');
-  const [showGoogleEmbed, setShowGoogleEmbed] = useState(false);
+  const [showGoogleEmbed, setShowGoogleEmbed] = useState(Boolean(settings.googleCalendarEmbedUrl));
+  const [isConnectingCal, setIsConnectingCal] = useState(false);
+  const [inputCalUrl, setInputCalUrl] = useState(settings.googleCalendarEmbedUrl || '');
+
+  // Keep embed view synced if settings change
+  useEffect(() => {
+    if (settings.googleCalendarEmbedUrl) {
+      setShowGoogleEmbed(true);
+    }
+  }, [settings.googleCalendarEmbedUrl]);
 
   const viewMode = panelStates.calendar === 'month' ? 'month' : 'week';
+
+  const handleSaveGoogleCalendar = (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalized = normalizeGoogleCalendarUrl(inputCalUrl);
+    if (!normalized) return;
+    updateSettings({ googleCalendarEmbedUrl: normalized });
+    setShowGoogleEmbed(true);
+    setIsConnectingCal(false);
+  };
+
+  const handleDisconnectCal = () => {
+    if (window.confirm('Disconnect Google Calendar from Momentum?')) {
+      updateSettings({ googleCalendarEmbedUrl: '' });
+      setShowGoogleEmbed(false);
+      setInputCalUrl('');
+      setIsConnectingCal(false);
+    }
+  };
 
   const handlePrev = () => {
     const d = new Date(currentDate);
@@ -115,76 +156,200 @@ export const CalendarPanel: React.FC = () => {
 
         {/* View Switchers & Nav */}
         <div className="flex items-center gap-1.5 text-xs">
-          {settings.googleCalendarEmbedUrl && (
+          {settings.googleCalendarEmbedUrl ? (
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
+              <button
+                onClick={() => setShowGoogleEmbed(true)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                  showGoogleEmbed
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-blue-500'
+                }`}
+              >
+                Google Cal
+              </button>
+              <button
+                onClick={() => setShowGoogleEmbed(false)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                  !showGoogleEmbed
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-blue-500'
+                }`}
+              >
+                Local Strip
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => setShowGoogleEmbed(!showGoogleEmbed)}
-              className={`px-2 py-1 rounded-lg border text-[11px] font-medium transition ${
-                showGoogleEmbed
-                  ? 'bg-blue-600 text-white border-blue-500'
-                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-              }`}
+              onClick={() => setIsConnectingCal(!isConnectingCal)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 font-semibold text-[11px] hover:bg-blue-100 dark:hover:bg-blue-900/60 transition"
+              title="Attach your Google Calendar"
             >
-              Google Cal
+              <Link className="w-3 h-3" />
+              <span>Attach Google Cal</span>
             </button>
           )}
 
-          {/* Month / Week View Toggle */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
-            <button
-              onClick={() => setCalendarView('week')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                viewMode === 'week' && !showGoogleEmbed
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setCalendarView('month')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                viewMode === 'month' && !showGoogleEmbed
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              Month
-            </button>
-          </div>
+          {/* If viewing Local Strip: Month / Week View Toggle & Nav */}
+          {!showGoogleEmbed && (
+            <>
+              <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={() => setCalendarView('week')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    viewMode === 'week'
+                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Week
+                </button>
+                <button
+                  onClick={() => setCalendarView('month')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                    viewMode === 'month'
+                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Month
+                </button>
+              </div>
 
-          {/* Navigation Controls */}
-          <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
-            <button
-              onClick={handlePrev}
-              className="p-1 hover:text-blue-500 text-slate-500 transition"
-              title="Previous"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleToday}
-              className="px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-500"
-            >
-              Today
-            </button>
-            <button
-              onClick={handleNext}
-              className="p-1 hover:text-blue-500 text-slate-500 transition"
-              title="Next"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+              {/* Navigation Controls */}
+              <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={handlePrev}
+                  className="p-1 hover:text-blue-500 text-slate-500 transition"
+                  title="Previous"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={handleToday}
+                  className="px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300 hover:text-blue-500"
+                >
+                  Today
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="p-1 hover:text-blue-500 text-slate-500 transition"
+                  title="Next"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-          <button
-            onClick={() => setIsAddingEvent(!isAddingEvent)}
-            className="p-1 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition"
-            title="Add schedule event"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+              <button
+                onClick={() => setIsAddingEvent(!isAddingEvent)}
+                className="p-1 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition"
+                title="Add schedule event"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {/* Google Calendar Quick Actions (when connected) */}
+          {settings.googleCalendarEmbedUrl && (
+            <div className="flex items-center gap-1">
+              <a
+                href="https://calendar.google.com"
+                target="_blank"
+                rel="noreferrer"
+                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-blue-500 border border-slate-200 dark:border-slate-700 transition"
+                title="Open full Google Calendar in new tab"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <button
+                onClick={() => setIsConnectingCal(!isConnectingCal)}
+                className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-blue-500 border border-slate-200 dark:border-slate-700 transition"
+                title="Calendar Settings / Change URL"
+              >
+                <SettingsIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* INLINE GOOGLE CALENDAR SETUP DRAWER */}
+      {isConnectingCal && (
+        <div className="mb-3 p-3.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 space-y-3 animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="font-bold text-xs text-blue-900 dark:text-blue-100">
+                {settings.googleCalendarEmbedUrl ? 'Manage Google Calendar' : 'Attach Your Google Calendar'}
+              </span>
+            </div>
+            <button
+              onClick={() => setIsConnectingCal(false)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSaveGoogleCalendar} className="space-y-2">
+            <label className="text-[11px] text-slate-600 dark:text-slate-300 block">
+              Paste your <strong>Google Calendar Embed URL</strong>, <strong>&lt;iframe&gt; code</strong>, or your <strong>Google Email</strong>:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inputCalUrl}
+                onChange={(e) => setInputCalUrl(e.target.value)}
+                placeholder="https://calendar.google.com/calendar/embed?src=... or yourname@gmail.com"
+                className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 font-mono text-[11px]"
+                autoFocus
+              />
+              <button
+                type="submit"
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shrink-0 transition"
+              >
+                Save & Connect
+              </button>
+              {settings.googleCalendarEmbedUrl && (
+                <button
+                  type="button"
+                  onClick={handleDisconnectCal}
+                  className="px-2 py-1.5 bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 hover:bg-rose-100 border border-rose-200 dark:border-rose-900/50 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1 transition"
+                  title="Disconnect"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Disconnect</span>
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Simple step-by-step instructions */}
+          <div className="text-[10px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 p-2.5 rounded-lg border border-slate-200/60 dark:border-slate-800/60 space-y-1">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">
+              💡 How to get your embed link (30 seconds):
+            </p>
+            <ol className="list-decimal list-inside space-y-0.5 text-slate-600 dark:text-slate-300">
+              <li>
+                Open{' '}
+                <a
+                  href="https://calendar.google.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 dark:text-blue-400 underline font-medium"
+                >
+                  calendar.google.com
+                </a>{' '}
+                on desktop.
+              </li>
+              <li>Click the <strong>Settings (gear ⚙️)</strong> &rarr; <strong>Settings</strong>.</li>
+              <li>In the left sidebar, click your calendar under <strong>Settings for my calendars</strong>.</li>
+              <li>Scroll down to <strong>Integrate calendar</strong> and copy the <strong>Embed code</strong> (or paste the URL).</li>
+            </ol>
+          </div>
+        </div>
+      )}
 
       {/* Quick Add Event Form */}
       {isAddingEvent && (
@@ -234,12 +399,36 @@ export const CalendarPanel: React.FC = () => {
 
       {/* GOOGLE CALENDAR EMBED VIEW (If enabled & toggled) */}
       {showGoogleEmbed && settings.googleCalendarEmbedUrl ? (
-        <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 h-64 w-full">
-          <iframe
-            src={settings.googleCalendarEmbedUrl}
-            className="w-full h-full border-0"
-            title="Google Calendar"
-          />
+        <div className="space-y-1.5">
+          <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 h-72 sm:h-80 w-full bg-white dark:bg-slate-950 shadow-inner">
+            <iframe
+              src={settings.googleCalendarEmbedUrl}
+              className="w-full h-full border-0"
+              title="Google Calendar"
+              loading="lazy"
+            />
+          </div>
+          <div className="flex items-center justify-between px-1 text-[10px] text-slate-400">
+            <span>Viewing live Google Calendar</span>
+            <div className="flex items-center gap-2">
+              <a
+                href="https://calendar.google.com"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-blue-500 flex items-center gap-0.5 transition"
+              >
+                <span>Open in Google Calendar</span>
+                <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+              <span>•</span>
+              <button
+                onClick={() => setIsConnectingCal(true)}
+                className="hover:text-blue-500 transition"
+              >
+                Change Calendar URL
+              </button>
+            </div>
+          </div>
         </div>
       ) : viewMode === 'week' ? (
         /* WEEK VIEW (Clean, horizontal 7-day strip) */
@@ -368,6 +557,23 @@ export const CalendarPanel: React.FC = () => {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* If Google Calendar not connected yet, show quick prompt */}
+      {!settings.googleCalendarEmbedUrl && !isConnectingCal && (
+        <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-[11px]">
+            <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
+            <span>Connect your Google Calendar to see your schedule directly in Momentum</span>
+          </div>
+          <button
+            onClick={() => setIsConnectingCal(true)}
+            className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 font-semibold text-[11px] flex items-center gap-1 transition"
+          >
+            <Link className="w-3 h-3" />
+            <span>Attach Calendar</span>
+          </button>
         </div>
       )}
     </div>

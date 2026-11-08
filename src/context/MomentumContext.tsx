@@ -24,6 +24,13 @@ import {
   DEFAULT_INITIAL_DATA,
   DEFAULT_SETTINGS,
 } from '../services/storageService';
+import {
+  getStoredAccessToken,
+  requestGoogleTasksAuth,
+  fetchAllGoogleTasks,
+  syncTasksIntoBoard,
+  clearStoredAccessToken,
+} from '../services/googleTasksService';
 
 interface MomentumContextType {
   boardData: MomentumBoardData;
@@ -32,6 +39,10 @@ interface MomentumContextType {
   toggleTheme: () => void;
   layoutMode: LayoutMode;
   toggleLayoutMode: () => void;
+  // Google Tasks
+  isSyncingTasks: boolean;
+  syncGoogleTasks: (clientIdOverride?: string) => Promise<{ success: boolean; count: number; error?: string }>;
+  disconnectGoogleTasks: () => void;
   // Panel Levels
   panelStates: PanelStates;
   setPanelLevel: (panel: keyof Omit<PanelStates, 'calendar'>, level: PanelLevel) => void;
@@ -139,6 +150,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const toggleTheme = useCallback(() => {
+    localStorage.setItem('momentum_explicit_theme_v1', 'true');
     updateSettings({
       theme: settings.theme === 'dark' ? 'light' : 'dark',
     });
@@ -660,6 +672,94 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [updateBoard]
   );
 
+  // Google Tasks Synchronization
+  const [isSyncingTasks, setIsSyncingTasks] = useState(false);
+
+  // Auto-reset safety timer: never let isSyncingTasks get stuck in infinite spin
+  useEffect(() => {
+    if (isSyncingTasks) {
+      const timer = setTimeout(() => {
+        setIsSyncingTasks(false);
+      }, 25000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSyncingTasks]);
+
+  const syncGoogleTasks = useCallback(
+    async (clientIdOverride?: string): Promise<{ success: boolean; count: number; error?: string }> => {
+      const clientId = clientIdOverride || settings.googleTasksClientId;
+      if (!clientId) {
+        return {
+          success: false,
+          count: 0,
+          error: 'Please enter your Google OAuth Client ID in Settings first.',
+        };
+      }
+
+      setIsSyncingTasks(true);
+      try {
+        let token = getStoredAccessToken();
+        if (!token) {
+          token = await requestGoogleTasksAuth(clientId);
+        }
+
+        // Successfully authenticated with Google
+        updateSettings({
+          googleTasksClientId: clientId,
+          googleTasksConnected: true,
+        });
+
+        const taskLists = await fetchAllGoogleTasks(token);
+        let totalAdded = 0;
+
+        updateBoard((prev) => {
+          const result = syncTasksIntoBoard(prev, taskLists);
+          totalAdded = result.totalSynced;
+          return result.updatedBoard;
+        });
+
+        if (totalAdded > 0) {
+          soundService.playSuccessChime();
+        }
+
+        updateSettings({
+          googleTasksConnected: true,
+          googleTasksLastSync: Date.now(),
+        });
+
+        return { success: true, count: totalAdded };
+      } catch (err: any) {
+        return {
+          success: false,
+          count: 0,
+          error: err?.message || 'Failed to sync Google Tasks.',
+        };
+      } finally {
+        setIsSyncingTasks(false);
+      }
+    },
+    [settings.googleTasksClientId, updateBoard, updateSettings]
+  );
+
+  const disconnectGoogleTasks = useCallback(() => {
+    clearStoredAccessToken();
+    updateSettings({
+      googleTasksConnected: false,
+      googleTasksLastSync: undefined,
+    });
+  }, [updateSettings]);
+
+  // Auto-sync Google Tasks every 5 minutes if enabled
+  useEffect(() => {
+    if (!settings.googleTasksConnected || !settings.googleTasksAutoSync || !settings.googleTasksClientId) {
+      return;
+    }
+    const interval = setInterval(() => {
+      syncGoogleTasks();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [settings.googleTasksConnected, settings.googleTasksAutoSync, settings.googleTasksClientId, syncGoogleTasks]);
+
   return (
     <MomentumContext.Provider
       value={{
@@ -669,6 +769,9 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         toggleTheme,
         layoutMode,
         toggleLayoutMode,
+        isSyncingTasks,
+        syncGoogleTasks,
+        disconnectGoogleTasks,
         panelStates,
         setPanelLevel,
         cyclePanelLevel,

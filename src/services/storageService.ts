@@ -48,10 +48,14 @@ export const DEFAULT_INITIAL_DATA: MomentumBoardData = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'dark',
+  theme: 'light',
   geminiApiKey: '',
   geminiModel: 'gemini-3.8-flash',
   googleCalendarEmbedUrl: '',
+  googleTasksClientId: '',
+  googleTasksConnected: false,
+  googleTasksAutoSync: false,
+  googleTasksLastSync: undefined,
   firebaseConfig: null,
   useCloudSync: false,
   userBoardId: 'main-cockpit'
@@ -60,6 +64,33 @@ export const DEFAULT_SETTINGS: AppSettings = {
 let cachedFirestore: Firestore | null = null;
 let unsubscribeFirestore: (() => void) | null = null;
 
+export function normalizeGoogleCalendarUrl(input: string): string {
+  let trimmed = input.trim();
+  if (!trimmed) return '';
+
+  // 1. If user pasted the whole <iframe> tag: <iframe src="https://..." ...></iframe>
+  const iframeMatch = trimmed.match(/src=["']([^"']+)["']/i);
+  if (iframeMatch && iframeMatch[1]) {
+    trimmed = iframeMatch[1];
+  }
+
+  // 2. Unescape HTML entities like &amp;
+  trimmed = trimmed.replace(/&amp;/g, '&');
+
+  // 3. If user entered an email address like user@gmail.com
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) {
+    return `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(trimmed)}&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=0`;
+  }
+
+  // 4. Ensure clean embed layout (no bloated header) if not present
+  if (trimmed.includes('calendar.google.com/calendar/embed') && !trimmed.includes('showTitle=')) {
+    const sep = trimmed.includes('?') ? '&' : '?';
+    trimmed = `${trimmed}${sep}showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=0`;
+  }
+
+  return trimmed;
+}
+
 export function loadSettingsFromStorage(): AppSettings {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
@@ -67,6 +98,9 @@ export function loadSettingsFromStorage(): AppSettings {
       const parsed = JSON.parse(raw);
       if (!parsed.geminiModel || parsed.geminiModel.includes('2.5') || parsed.geminiModel.includes('1.5')) {
         parsed.geminiModel = 'gemini-3.8-flash';
+      }
+      if (!localStorage.getItem('momentum_explicit_theme_v1')) {
+        parsed.theme = 'light';
       }
       return { ...DEFAULT_SETTINGS, ...parsed };
     }

@@ -7,6 +7,7 @@ export interface QuickJob {
   duration?: QuickJobDuration;
   done: boolean;
   createdAt: number;
+  googleTaskId?: string;
 }
 
 export type ResponsibilityStatus = 'active' | 'waiting' | 'paused' | 'done';
@@ -19,6 +20,7 @@ export interface Responsibility {
   due?: string | null;
   status: ResponsibilityStatus;
   createdAt: number;
+  googleTaskId?: string;
 }
 
 export type ProjectStatus = 'moving' | 'attention_needed' | 'waiting' | 'parked' | 'completed';
@@ -38,6 +40,7 @@ export interface Project {
   last_updated: number; // ms timestamp
   review_interval_days: number; // default 7
   history: ProjectHistoryEntry[];
+  googleTaskId?: string;
 }
 
 export type HabitType = 'boolean' | 'duration_min';
@@ -49,6 +52,7 @@ export interface Habit {
   target: number; // 1 for boolean, minutes for duration
   next_due?: string | null; // e.g. "Tonight by 11:30 PM", "Daily 8:00 AM"
   log: Record<string, boolean | number>; // YYYY-MM-DD -> value
+  googleTaskId?: string;
 }
 
 export interface CalendarEvent {
@@ -92,6 +96,10 @@ export interface AppSettings {
   geminiApiKey: string;
   geminiModel: string;
   googleCalendarEmbedUrl?: string; // Optional Google Calendar embed URL
+  googleTasksClientId?: string;    // Google OAuth 2.0 Client ID for Google Tasks
+  googleTasksConnected?: boolean;
+  googleTasksAutoSync?: boolean;
+  googleTasksLastSync?: number;
   firebaseConfig?: FirebaseConfigSettings | null;
   useCloudSync: boolean;
   userBoardId: string;

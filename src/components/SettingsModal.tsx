@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMomentum } from '../context/MomentumContext';
 import { AppSettings, FirebaseConfigSettings } from '../types';
+import { normalizeGoogleCalendarUrl } from '../services/storageService';
 import {
   X,
   Key,
@@ -14,6 +15,12 @@ import {
   Monitor,
   Sun,
   Moon,
+  ListTodo,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
+  Trash2,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -21,7 +28,14 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
-  const { settings, updateSettings, boardData } = useMomentum();
+  const {
+    settings,
+    updateSettings,
+    boardData,
+    syncGoogleTasks,
+    disconnectGoogleTasks,
+    isSyncingTasks,
+  } = useMomentum();
 
   const [geminiKey, setGeminiKey] = useState(settings.geminiApiKey || '');
   const [geminiModel, setGeminiModel] = useState(
@@ -30,6 +44,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       : 'gemini-3.8-flash'
   );
   const [googleCalUrl, setGoogleCalUrl] = useState(settings.googleCalendarEmbedUrl || '');
+  const [gtasksClientId, setGtasksClientId] = useState(settings.googleTasksClientId || '');
+  const [gtasksAutoSync, setGtasksAutoSync] = useState(settings.googleTasksAutoSync || false);
+  const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showGtasksGuide, setShowGtasksGuide] = useState(false);
+
   const [theme, setTheme] = useState<'dark' | 'light'>(settings.theme || 'dark');
   const [useCloudSync, setUseCloudSync] = useState(settings.useCloudSync || false);
   const [boardId, setBoardId] = useState(settings.userBoardId || 'main-cockpit');
@@ -45,13 +64,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
 
   const [isSaved, setIsSaved] = useState(false);
 
+  const handleConnectGoogleTasks = async () => {
+    setSyncFeedback(null);
+    if (!gtasksClientId.trim()) {
+      setSyncFeedback({
+        type: 'error',
+        message: 'Please enter your Google OAuth 2.0 Client ID below first.',
+      });
+      return;
+    }
+    updateSettings({
+      googleTasksClientId: gtasksClientId.trim(),
+      googleTasksAutoSync: gtasksAutoSync,
+    });
+    const res = await syncGoogleTasks(gtasksClientId.trim());
+    if (res.success) {
+      setSyncFeedback({
+        type: 'success',
+        message: `✓ Connected! Synced ${res.count} task${res.count === 1 ? '' : 's'} into your cockpit panels.`,
+      });
+    } else {
+      setSyncFeedback({
+        type: 'error',
+        message: res.error || 'Failed to authenticate with Google.',
+      });
+    }
+  };
+
+  const handleDisconnectGoogleTasks = () => {
+    disconnectGoogleTasks();
+    setSyncFeedback({
+      type: 'success',
+      message: 'Disconnected from Google Tasks.',
+    });
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     updateSettings({
       theme,
       geminiApiKey: geminiKey.trim(),
       geminiModel,
-      googleCalendarEmbedUrl: googleCalUrl.trim(),
+      googleCalendarEmbedUrl: normalizeGoogleCalendarUrl(googleCalUrl),
+      googleTasksClientId: gtasksClientId.trim(),
+      googleTasksAutoSync: gtasksAutoSync,
       useCloudSync,
       userBoardId: boardId.trim() || 'main-cockpit',
       firebaseConfig: useCloudSync && firebaseConfig.apiKey ? firebaseConfig : null,
@@ -151,6 +207,153 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             <p className="text-[10px] text-slate-400">
               In Google Calendar &rarr; Settings &rarr; Integrate Calendar &rarr; Copy "Embed code" src URL.
             </p>
+          </div>
+
+          {/* GOOGLE TASKS SYNC */}
+          <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-[11px]">
+                <ListTodo className="w-4 h-4 text-emerald-500" />
+                <span>Google Tasks (Voice Ingest from Gemini)</span>
+              </div>
+              {settings.googleTasksConnected ? (
+                <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800 font-semibold">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Connected</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                  Not Connected
+                </span>
+              )}
+            </div>
+
+            <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
+              Connect your Google Tasks account so tasks and voice thoughts you enter into the Gemini mobile app automatically flow into your Momentum Cockpit.
+            </p>
+
+            {/* Sync Feedback Message */}
+            {syncFeedback && (
+              <div
+                className={`p-2.5 rounded-xl border flex items-center gap-2 text-[11px] animate-fadeIn ${
+                  syncFeedback.type === 'success'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                }`}
+              >
+                {syncFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                )}
+                <span>{syncFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Client ID input */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Google OAuth 2.0 Web Client ID:
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowGtasksGuide(!showGtasksGuide)}
+                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5"
+                >
+                  <HelpCircle className="w-3 h-3" />
+                  <span>{showGtasksGuide ? 'Hide Setup Guide' : 'How to get this (free 2 min)?'}</span>
+                </button>
+              </div>
+              <input
+                type="text"
+                value={gtasksClientId}
+                onChange={(e) => setGtasksClientId(e.target.value)}
+                placeholder="xxxx-xxxx.apps.googleusercontent.com"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
+              />
+            </div>
+
+            {/* Step-by-step accordion guide */}
+            {showGtasksGuide && (
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 text-[10px] space-y-1.5 animate-fadeIn">
+                <p className="font-bold text-slate-700 dark:text-slate-300">
+                  🚀 3 quick steps to create your Google OAuth Client ID:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-400 leading-normal">
+                  <li>
+                    Go to{' '}
+                    <a
+                      href="https://console.cloud.google.com/apis/credentials"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 dark:text-blue-400 underline font-semibold"
+                    >
+                      Google Cloud Console &rarr; Credentials
+                    </a>.
+                  </li>
+                  <li>Click <strong>+ Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> &rarr; Application type: <strong>Web application</strong>.</li>
+                  <li>Under <strong>Authorized JavaScript origins</strong>, add: <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded">http://localhost:5173</code></li>
+                  <li>Click <strong>Create</strong> and copy your <strong>Client ID</strong> into the box above.</li>
+                  <li>
+                    Make sure the API is enabled: Open{' '}
+                    <a
+                      href="https://console.cloud.google.com/apis/library/tasks.googleapis.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 dark:text-blue-400 underline font-semibold"
+                    >
+                      Google Tasks API Library
+                    </a>{' '}
+                    and click <strong>Enable</strong> if not already active.
+                  </li>
+                </ol>
+              </div>
+            )}
+
+            {/* Connection Actions */}
+            <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleConnectGoogleTasks}
+                  disabled={isSyncingTasks}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 transition shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingTasks ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isSyncingTasks
+                      ? 'Authenticating & Syncing...'
+                      : settings.googleTasksConnected
+                      ? 'Sync Tasks Now'
+                      : 'Sign in with Google & Sync'}
+                  </span>
+                </button>
+
+                {settings.googleTasksConnected && (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectGoogleTasks}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-rose-500 text-xs flex items-center gap-1 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Disconnect</span>
+                  </button>
+                )}
+              </div>
+
+              {settings.googleTasksConnected && (
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-600 dark:text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={gtasksAutoSync}
+                    onChange={(e) => setGtasksAutoSync(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Auto-sync every 5 min</span>
+                </label>
+              )}
+            </div>
           </div>
 
           {/* GEMINI API SETTINGS */}
