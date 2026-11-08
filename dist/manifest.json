@@ -1,5 +1,5 @@
 {
-  "name": "Momentum Cockpit",
+  "name": "Momentum",
   "short_name": "Momentum",
   "description": "ADHD-Optimized Productivity Cockpit & Voice Ingestion",
   "start_url": "./",
@@ -8,7 +8,7 @@
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
   "orientation": "any",
-  "id": "momentum-cockpit-pwa",
+  "id": "momentum-app-v2",
   "icons": [
     {
       "src": "./icons/icon-192.png",
