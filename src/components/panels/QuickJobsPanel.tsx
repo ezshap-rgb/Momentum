@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useMomentum } from '../../context/MomentumContext';
 import { QuickJobDuration } from '../../types';
 import {
@@ -19,6 +19,7 @@ export const QuickJobsPanel: React.FC = () => {
   const [newTitle, setNewTitle] = useState('');
   const [newDuration, setNewDuration] = useState<QuickJobDuration>('5m');
   const [filterDuration, setFilterDuration] = useState<'all' | '1m' | '5m' | '15m'>('all');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const level = panelStates.quick_jobs; // 'collapsed' | 'compact' | 'expanded'
 
@@ -30,9 +31,12 @@ export const QuickJobsPanel: React.FC = () => {
     return j.duration === filterDuration;
   });
 
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
+  const handleAdd = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newTitle.trim()) {
+      inputRef.current?.focus();
+      return;
+    }
     addQuickJob(newTitle.trim(), newDuration);
     setNewTitle('');
   };
@@ -81,6 +85,16 @@ export const QuickJobsPanel: React.FC = () => {
         {/* Level Controls */}
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <button
+            onClick={() => {
+              if (level === 'collapsed') cyclePanelLevel('quick_jobs');
+              setTimeout(() => inputRef.current?.focus(), 100);
+            }}
+            className="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
+            title="Add Quick Job"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          <button
             onClick={() => cyclePanelLevel('quick_jobs')}
             className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition"
             title={`View: ${level}. Click to cycle`}
@@ -112,11 +126,14 @@ export const QuickJobsPanel: React.FC = () => {
           {/* Quick Add Bar */}
           <form onSubmit={handleAdd} className="flex items-center gap-1.5 shrink-0">
             <input
+              ref={inputRef}
               type="text"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Quick task (remind me how quick it is)..."
-              className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+              placeholder="Type quick task here (e.g. Call Sam)..."
+              autoComplete="off"
+              enterKeyHint="done"
+              className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
             />
             <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px]">
               {(['1m', '5m', '15m'] as QuickJobDuration[]).map((dur) => (
@@ -136,8 +153,7 @@ export const QuickJobsPanel: React.FC = () => {
             </div>
             <button
               type="submit"
-              disabled={!newTitle.trim()}
-              className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition shrink-0"
+              className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition shrink-0 cursor-pointer flex items-center justify-center shadow-xs"
               title="Add Quick Job"
             >
               <Plus className="w-3.5 h-3.5" />

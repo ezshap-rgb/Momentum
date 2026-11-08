@@ -35,6 +35,7 @@ import {
   clearStoredAccessToken,
   markGoogleTaskCompleted,
   deleteGoogleTask,
+  createGoogleTask,
 } from '../services/googleTasksService';
 
 interface MomentumContextType {
@@ -197,10 +198,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addQuickJob = useCallback(
     (title: string, duration?: QuickJobDuration, due?: string | null) => {
       if (!title.trim()) return;
+      const cleanTitle = title.trim();
+      const jobDuration = duration || '5m';
+      const jobId = `qj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const newJob: QuickJob = {
-        id: `qj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        title: title.trim(),
-        duration: duration || '5m',
+        id: jobId,
+        title: cleanTitle,
+        duration: jobDuration,
         due: due || null,
         done: false,
         createdAt: Date.now(),
@@ -209,8 +213,21 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         quick_jobs: [newJob, ...prev.quick_jobs],
       }));
+
+      // Background push to Google Tasks if connected
+      const token = getStoredAccessToken();
+      if (token && settings.googleTasksConnected) {
+        createGoogleTask(token, '@default', `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
+            }));
+          }
+        });
+      }
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksConnected]
   );
 
   const toggleQuickJob = useCallback(

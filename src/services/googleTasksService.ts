@@ -501,3 +501,38 @@ export async function deleteGoogleTask(
   }
 }
 
+/**
+ * Create a new task in Google Tasks
+ */
+export async function createGoogleTask(
+  accessToken: string,
+  listId: string,
+  title: string,
+  notes?: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          notes: notes || '',
+          status: 'needsAction',
+        }),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return data.id || null;
+    }
+  } catch (e) {
+    console.warn('Failed to create task in Google Tasks:', e);
+  }
+  return null;
+}
+
