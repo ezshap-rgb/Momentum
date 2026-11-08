@@ -1,9 +1,10 @@
-const CACHE_NAME = 'momentum-cache-v1';
+const CACHE_NAME = 'momentum-cache-v2';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icons/app-icon.jpg'
+  './',
+  './index.html',
+  './manifest.json',
+  './icons/icon-192.png',
+  './icons/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -27,7 +28,6 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let network take priority, fall back to cache for offline resilience
   if (event.request.method !== 'GET') return;
   event.respondWith(
     fetch(event.request)
@@ -45,4 +45,3 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
-

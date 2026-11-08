@@ -20,11 +20,73 @@ function getIsoDateString(daysAgo = 0): string {
   return d.toISOString().split('T')[0];
 }
 
-// Clean Slate: Real Push-ups habits retained, starter samples wiped clean
+// Clean Slate: Real Push-ups habits retained, starter projects & responsibilities seeded
 export const DEFAULT_INITIAL_DATA: MomentumBoardData = {
-  quick_jobs: [],
-  responsibilities: [],
-  projects: [],
+  quick_jobs: [
+    {
+      id: 'qj-1',
+      title: 'Review weekly priority list',
+      duration: '5m',
+      done: false,
+      createdAt: Date.now(),
+    },
+    {
+      id: 'qj-2',
+      title: 'Test voice note via Gemini mobile app',
+      duration: '1m',
+      done: false,
+      createdAt: Date.now(),
+    },
+  ],
+  responsibilities: [
+    {
+      id: 'resp-1',
+      title: 'Workshop Organization',
+      steps: [
+        'Clear and wipe the main workbench surface',
+        'Sort hardware bins and fastener drawers',
+        'Label tool storage racks',
+      ],
+      current_step_index: 0,
+      due: 'This Weekend',
+      status: 'active',
+      createdAt: Date.now(),
+    },
+  ],
+  projects: [
+    {
+      id: 'proj-1',
+      name: 'Sphere It',
+      status: 'moving',
+      current_position: 'Initial design and CAD prototyping phase',
+      next_step: 'Verify dimensions and test fit first prototype model',
+      last_updated: Date.now(),
+      review_interval_days: 7,
+      history: [
+        {
+          timestamp: Date.now(),
+          note: 'Project initialized on Momentum Cockpit',
+          next_step: 'Verify dimensions and test fit first prototype model',
+        },
+      ],
+    },
+    {
+      id: 'proj-2',
+      name: 'Smart Filing Cabinet',
+      status: 'moving',
+      current_position: 'System concept definition and hardware mapping',
+      next_step: 'Draft sensor layout and micro-controller wiring diagram',
+      last_updated: Date.now(),
+      review_interval_days: 7,
+      history: [
+        {
+          timestamp: Date.now(),
+          note: 'Project initialized on Momentum Cockpit',
+          next_step: 'Draft sensor layout and micro-controller wiring diagram',
+        },
+      ],
+    },
+  ],
   habits: [
     {
       id: 'hab-1',
@@ -32,7 +94,7 @@ export const DEFAULT_INITIAL_DATA: MomentumBoardData = {
       type: 'boolean',
       target: 1,
       next_due: 'Daily Morning',
-      log: {}
+      log: {},
     },
     {
       id: 'hab-2',
@@ -40,11 +102,11 @@ export const DEFAULT_INITIAL_DATA: MomentumBoardData = {
       type: 'boolean',
       target: 1,
       next_due: 'Daily Night',
-      log: {}
-    }
+      log: {},
+    },
   ],
   calendar_events: [],
-  current_focus_project_id: null
+  current_focus_project_id: 'proj-1',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -126,10 +188,22 @@ export function loadLocalBoardData(): MomentumBoardData {
       return {
         ...DEFAULT_INITIAL_DATA,
         ...parsed,
-        quick_jobs: parsed.quick_jobs || DEFAULT_INITIAL_DATA.quick_jobs,
-        responsibilities: parsed.responsibilities || DEFAULT_INITIAL_DATA.responsibilities,
-        projects: parsed.projects || DEFAULT_INITIAL_DATA.projects,
-        habits: parsed.habits || DEFAULT_INITIAL_DATA.habits,
+        quick_jobs:
+          parsed.quick_jobs && parsed.quick_jobs.length > 0
+            ? parsed.quick_jobs
+            : DEFAULT_INITIAL_DATA.quick_jobs,
+        responsibilities:
+          parsed.responsibilities && parsed.responsibilities.length > 0
+            ? parsed.responsibilities
+            : DEFAULT_INITIAL_DATA.responsibilities,
+        projects:
+          parsed.projects && parsed.projects.length > 0
+            ? parsed.projects
+            : DEFAULT_INITIAL_DATA.projects,
+        habits:
+          parsed.habits && parsed.habits.length > 0
+            ? parsed.habits
+            : DEFAULT_INITIAL_DATA.habits,
         calendar_events: parsed.calendar_events || DEFAULT_INITIAL_DATA.calendar_events,
       };
     }

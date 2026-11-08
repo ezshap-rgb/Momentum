@@ -88,7 +88,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
         {/* Brand & Artwork */}
         <div className="flex items-center gap-2">
           <img
-            src="/icons/icon-192.png"
+            src="./icons/icon-192.png"
             alt="Momentum"
             className="w-7 h-7 rounded-xl shadow-xs border border-purple-500/30 object-cover"
           />
