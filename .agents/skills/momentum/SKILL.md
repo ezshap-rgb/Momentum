@@ -48,6 +48,7 @@ Long-term creative or engineering initiatives that need context continuity ("Whe
     status: 'moving' | 'attention_needed' | 'waiting' | 'parked' | 'completed',
     current_position: string, // 1-sentence "Where holding"
     next_step: string,        // Immediate physical action
+    upcoming_steps?: string[], // Subsequent planned steps (e.g. ['Step 2...', 'Step 3...'])
     last_updated: number,
     review_interval_days: number,
     history: Array<{ timestamp: number, note: string, next_step: string }>
@@ -67,6 +68,25 @@ Guilt-free routines tracked with next upcoming responsibility timing:
     log: Record<string, boolean | number> // YYYY-MM-DD -> value
   }
   ```
+
+## Google Tasks Voice/Mobile Ingestion Format
+When creating tasks in Google Tasks via voice or Gemini:
+- **Quick Jobs**: `[5m] Task name` (or `[1m]`, `[15m]`)
+- **Responsibilities**:
+  - Title: `Resp: Project/Area -> Step 1 action`
+  - Notes:
+    ```
+    Step 2: Subsequent action
+    Step 3: Following action
+    ```
+- **Projects**:
+  - Title: `Project: Project Name | Next: Immediate first physical action`
+  - Notes:
+    ```
+    Where holding: Context or initial status
+    Step 2: Second planned action
+    Step 3: Third planned action
+    ```
 
 ## How to Apply User Requests
 When the user gives natural language input (e.g. "Add a 5m job to call Sam", "Mark morning push-ups done", "Update Sphere It: printed ring, next step test fit"):

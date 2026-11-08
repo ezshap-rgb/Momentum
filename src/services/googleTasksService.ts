@@ -1,4 +1,5 @@
 import { MomentumBoardData, QuickJob, Responsibility, Project, Habit, QuickJobDuration } from '../types';
+import { getDeletedGoogleTaskIds } from './storageService';
 
 declare global {
   interface Window {
@@ -194,6 +195,30 @@ export interface SyncTasksResult {
 }
 
 /**
+ * Parses multi-step task breakdowns from task notes.
+ * Matches:
+ * "Step 1: ...", "Step 2: ...", "1. ...", "2) ...", "- ...", "* ..."
+ */
+export function parseStepsFromNotes(notes?: string | null): string[] {
+  if (!notes || !notes.trim()) return [];
+  const lines = notes.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const steps: string[] = [];
+
+  for (const line of lines) {
+    if (/^(?:where holding|context|status):\s*/i.test(line)) {
+      continue;
+    }
+    const cleaned = line
+      .replace(/^(?:step\s*\d+[:.-]?|\d+[.)-]|[-*•])\s*/i, '')
+      .trim();
+    if (cleaned && cleaned.length > 1) {
+      steps.push(cleaned);
+    }
+  }
+  return steps;
+}
+
+/**
  * Intelligent parser that converts Google Tasks into Momentum's 4 ADHD buckets.
  */
 export function syncTasksIntoBoard(
@@ -210,6 +235,9 @@ export function syncTasksIntoBoard(
   const projects = [...boardData.projects];
   const habits = [...boardData.habits];
 
+  // Load deleted IDs so completed / deleted tasks are NEVER resurrected
+  const deletedTaskIds = getDeletedGoogleTaskIds();
+
   // Helper set of existing task titles and googleTaskIds to avoid duplicates
   const existingJobKeys = new Set(quickJobs.map((j) => j.googleTaskId || j.title.toLowerCase().trim()));
   const existingRespKeys = new Set(responsibilities.map((r) => r.googleTaskId || r.title.toLowerCase().trim()));
@@ -222,6 +250,12 @@ export function syncTasksIntoBoard(
       if (!rawTitle) continue;
 
       const taskId = task.id;
+
+      // Skip anything explicitly deleted or completed locally
+      if (taskId && deletedTaskIds.has(taskId)) continue;
+      if (deletedTaskIds.has(rawTitle.toLowerCase())) continue;
+
+      const noteSteps = parseStepsFromNotes(task.notes);
 
       // 1. QUICK JOBS (Tagged [1m], [5m], [15m])
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
@@ -251,7 +285,7 @@ export function syncTasksIntoBoard(
       if (respMatch) {
         const fullContent = respMatch[1].trim();
         let respTitle = fullContent;
-        let nextStep = 'Step 1: First physical action';
+        let nextStep = '';
 
         if (fullContent.includes('->')) {
           const parts = fullContent.split('->');
@@ -259,12 +293,28 @@ export function syncTasksIntoBoard(
           nextStep = parts.slice(1).join('->').trim();
         }
 
+        // Incorporate multi-step breakdown from task notes
+        let allSteps: string[] = [];
+        if (nextStep && noteSteps.length > 0) {
+          if (noteSteps[0].toLowerCase() === nextStep.toLowerCase()) {
+            allSteps = noteSteps;
+          } else {
+            allSteps = [nextStep, ...noteSteps];
+          }
+        } else if (nextStep) {
+          allSteps = [nextStep];
+        } else if (noteSteps.length > 0) {
+          allSteps = noteSteps;
+        } else {
+          allSteps = ['Step 1: First physical action'];
+        }
+
         const key = taskId || respTitle.toLowerCase();
         if (!existingRespKeys.has(key)) {
           responsibilities.unshift({
             id: `gt-resp-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             title: respTitle,
-            steps: [nextStep],
+            steps: allSteps,
             current_step_index: 0,
             status: 'active',
             createdAt: Date.now(),
@@ -303,7 +353,7 @@ export function syncTasksIntoBoard(
       if (projMatch) {
         const fullContent = projMatch[1].trim();
         let projName = fullContent;
-        let nextStep = 'Define initial prototype';
+        let nextStep = '';
 
         if (fullContent.includes('|')) {
           const parts = fullContent.split('|');
@@ -316,20 +366,45 @@ export function syncTasksIntoBoard(
           }
         }
 
+        // Parse multi-step items from notes
+        let upcomingSteps: string[] = [];
+        if (!nextStep && noteSteps.length > 0) {
+          nextStep = noteSteps[0];
+          upcomingSteps = noteSteps.slice(1);
+        } else if (nextStep && noteSteps.length > 0) {
+          if (noteSteps[0].toLowerCase() === nextStep.toLowerCase()) {
+            upcomingSteps = noteSteps.slice(1);
+          } else {
+            upcomingSteps = noteSteps;
+          }
+        } else if (!nextStep) {
+          nextStep = 'Define initial prototype';
+        }
+
+        // Check if notes had a "Where holding:" context line
+        let currentPosition = 'Imported from Google Tasks';
+        if (task.notes) {
+          const posLine = task.notes.split(/\r?\n/).find((l) => /^(?:where holding|context|status):\s*/i.test(l.trim()));
+          if (posLine) {
+            currentPosition = posLine.replace(/^(?:where holding|context|status):\s*/i, '').trim();
+          }
+        }
+
         const key = taskId || projName.toLowerCase();
         if (!existingProjKeys.has(key)) {
           projects.push({
             id: `gt-proj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             name: projName,
             status: 'moving',
-            current_position: 'Imported from Google Tasks',
+            current_position: currentPosition,
             next_step: nextStep,
+            upcoming_steps: upcomingSteps.length > 0 ? upcomingSteps : undefined,
             last_updated: Date.now(),
             review_interval_days: 7,
             history: [
               {
                 timestamp: Date.now(),
-                note: 'Imported from Google Tasks via Gemini mobile entry',
+                note: `Imported from Google Tasks: ${currentPosition}`,
                 next_step: nextStep,
               },
             ],
@@ -379,7 +454,7 @@ export function syncTasksIntoBoard(
 }
 
 /**
- * Optional: Mark a task completed on Google Tasks when checked off in Momentum
+ * Mark a task completed on Google Tasks when checked off in Momentum
  */
 export async function markGoogleTaskCompleted(
   accessToken: string,
@@ -400,6 +475,29 @@ export async function markGoogleTaskCompleted(
     );
   } catch (e) {
     console.warn('Failed to mark task completed on Google Tasks:', e);
+  }
+}
+
+/**
+ * Permanently delete a task on Google Tasks when removed from Momentum
+ */
+export async function deleteGoogleTask(
+  accessToken: string,
+  listId: string,
+  taskId: string
+): Promise<void> {
+  try {
+    await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+  } catch (e) {
+    console.warn('Failed to delete task from Google Tasks:', e);
   }
 }
 

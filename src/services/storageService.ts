@@ -180,6 +180,26 @@ export function saveSettingsToStorage(settings: AppSettings): void {
   }
 }
 
+const DELETED_GTASKS_KEY = 'momentum_deleted_gtasks_v1';
+
+export function getDeletedGoogleTaskIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_GTASKS_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set();
+}
+
+export function recordDeletedGoogleTaskId(taskId: string): void {
+  try {
+    const existing = getDeletedGoogleTaskIds();
+    existing.add(taskId);
+    localStorage.setItem(DELETED_GTASKS_KEY, JSON.stringify(Array.from(existing)));
+  } catch (e) {
+    console.error('Failed to record deleted Google Task ID:', e);
+  }
+}
+
 export function loadLocalBoardData(): MomentumBoardData {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_DATA_KEY);
@@ -188,23 +208,21 @@ export function loadLocalBoardData(): MomentumBoardData {
       return {
         ...DEFAULT_INITIAL_DATA,
         ...parsed,
-        quick_jobs:
-          parsed.quick_jobs && parsed.quick_jobs.length > 0
-            ? parsed.quick_jobs
-            : DEFAULT_INITIAL_DATA.quick_jobs,
-        responsibilities:
-          parsed.responsibilities && parsed.responsibilities.length > 0
-            ? parsed.responsibilities
-            : DEFAULT_INITIAL_DATA.responsibilities,
-        projects:
-          parsed.projects && parsed.projects.length > 0
-            ? parsed.projects
-            : DEFAULT_INITIAL_DATA.projects,
-        habits:
-          parsed.habits && parsed.habits.length > 0
-            ? parsed.habits
-            : DEFAULT_INITIAL_DATA.habits,
-        calendar_events: parsed.calendar_events || DEFAULT_INITIAL_DATA.calendar_events,
+        quick_jobs: Array.isArray(parsed.quick_jobs)
+          ? parsed.quick_jobs
+          : DEFAULT_INITIAL_DATA.quick_jobs,
+        responsibilities: Array.isArray(parsed.responsibilities)
+          ? parsed.responsibilities
+          : DEFAULT_INITIAL_DATA.responsibilities,
+        projects: Array.isArray(parsed.projects)
+          ? parsed.projects
+          : DEFAULT_INITIAL_DATA.projects,
+        habits: Array.isArray(parsed.habits)
+          ? parsed.habits
+          : DEFAULT_INITIAL_DATA.habits,
+        calendar_events: Array.isArray(parsed.calendar_events)
+          ? parsed.calendar_events
+          : DEFAULT_INITIAL_DATA.calendar_events,
       };
     }
   } catch (e) {

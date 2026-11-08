@@ -17,10 +17,13 @@ import {
 } from '../types';
 import { soundService } from '../services/soundService';
 import {
+  loadLocalBoardData,
+  saveLocalBoardData,
   loadSettingsFromStorage,
   saveSettingsToStorage,
   subscribeToBoardData,
   persistBoardData,
+  recordDeletedGoogleTaskId,
   DEFAULT_INITIAL_DATA,
   DEFAULT_SETTINGS,
 } from '../services/storageService';
@@ -30,6 +33,8 @@ import {
   fetchAllGoogleTasks,
   syncTasksIntoBoard,
   clearStoredAccessToken,
+  markGoogleTaskCompleted,
+  deleteGoogleTask,
 } from '../services/googleTasksService';
 
 interface MomentumContextType {
@@ -72,6 +77,7 @@ interface MomentumContextType {
   setProjectStatus: (id: string, status: ProjectStatus) => void;
   setFocusProject: (id: string | null) => void;
   deleteProject: (id: string) => void;
+  completeProjectStep: (id: string, newNextStep?: string) => void;
   // Habits
   toggleHabitDate: (id: string, dateStr: string) => void;
   setHabitDuration: (id: string, dateStr: string, minutes: number) => void;
@@ -88,7 +94,7 @@ const MomentumContext = createContext<MomentumContextType | undefined>(undefined
 
 export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage);
-  const [boardData, setBoardData] = useState<MomentumBoardData>(DEFAULT_INITIAL_DATA);
+  const [boardData, setBoardData] = useState<MomentumBoardData>(loadLocalBoardData);
 
   // Panel state levels: Default all 4 panels in 'compact' mode so everything fits without scrolling!
   const [panelStates, setPanelStates] = useState<PanelStates>({
@@ -211,13 +217,21 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (id: string) => {
       updateBoard((prev) => {
         const target = prev.quick_jobs.find((j) => j.id === id);
-        if (target && !target.done) {
+        const willBeDone = target ? !target.done : false;
+        if (target && willBeDone) {
           soundService.playSuccessChime();
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            const token = getStoredAccessToken();
+            if (token) {
+              markGoogleTaskCompleted(token, '@default', target.googleTaskId);
+            }
+          }
         }
         return {
           ...prev,
           quick_jobs: prev.quick_jobs.map((j) =>
-            j.id === id ? { ...j, done: !j.done } : j
+            j.id === id ? { ...j, done: willBeDone } : j
           ),
         };
       });
@@ -227,10 +241,23 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteQuickJob = useCallback(
     (id: string) => {
-      updateBoard((prev) => ({
-        ...prev,
-        quick_jobs: prev.quick_jobs.filter((j) => j.id !== id),
-      }));
+      updateBoard((prev) => {
+        const target = prev.quick_jobs.find((j) => j.id === id);
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            const token = getStoredAccessToken();
+            if (token) {
+              deleteGoogleTask(token, '@default', target.googleTaskId);
+            }
+          }
+          recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
+        }
+        return {
+          ...prev,
+          quick_jobs: prev.quick_jobs.filter((j) => j.id !== id),
+        };
+      });
     },
     [updateBoard]
   );
@@ -338,10 +365,23 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteResponsibility = useCallback(
     (id: string) => {
-      updateBoard((prev) => ({
-        ...prev,
-        responsibilities: prev.responsibilities.filter((r) => r.id !== id),
-      }));
+      updateBoard((prev) => {
+        const target = prev.responsibilities.find((r) => r.id === id);
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            const token = getStoredAccessToken();
+            if (token) {
+              deleteGoogleTask(token, '@default', target.googleTaskId);
+            }
+          }
+          recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
+        }
+        return {
+          ...prev,
+          responsibilities: prev.responsibilities.filter((r) => r.id !== id),
+        };
+      });
     },
     [updateBoard]
   );
@@ -439,11 +479,67 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteProject = useCallback(
     (id: string) => {
+      updateBoard((prev) => {
+        const target = prev.projects.find((p) => p.id === id);
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            const token = getStoredAccessToken();
+            if (token) {
+              deleteGoogleTask(token, '@default', target.googleTaskId);
+            }
+          }
+          recordDeletedGoogleTaskId(target.name.trim().toLowerCase());
+        }
+        return {
+          ...prev,
+          projects: prev.projects.filter((p) => p.id !== id),
+          current_focus_project_id:
+            prev.current_focus_project_id === id ? null : prev.current_focus_project_id,
+        };
+      });
+    },
+    [updateBoard]
+  );
+
+  const completeProjectStep = useCallback(
+    (id: string, newNextStep?: string) => {
+      soundService.playSuccessChime();
       updateBoard((prev) => ({
         ...prev,
-        projects: prev.projects.filter((p) => p.id !== id),
-        current_focus_project_id:
-          prev.current_focus_project_id === id ? null : prev.current_focus_project_id,
+        projects: prev.projects.map((p) => {
+          if (p.id !== id) return p;
+          const completedStep = p.next_step;
+          let nextStepVal = '';
+          const remainingUpcoming = p.upcoming_steps ? [...p.upcoming_steps] : [];
+
+          if (newNextStep !== undefined && newNextStep.trim()) {
+            nextStepVal = newNextStep.trim();
+          } else if (remainingUpcoming.length > 0) {
+            nextStepVal = remainingUpcoming.shift()!;
+          } else {
+            nextStepVal = 'Define next milestone';
+          }
+
+          const historyEntry = {
+            timestamp: Date.now(),
+            note: `Completed step: ${completedStep}`,
+            next_step: nextStepVal,
+          };
+
+          const updatedPosition = p.current_position
+            ? `${p.current_position} • Completed: ${completedStep}`
+            : `Completed: ${completedStep}`;
+
+          return {
+            ...p,
+            next_step: nextStepVal,
+            upcoming_steps: remainingUpcoming,
+            current_position: updatedPosition,
+            last_updated: Date.now(),
+            history: [...p.history, historyEntry],
+          };
+        }),
       }));
     },
     [updateBoard]
@@ -791,6 +887,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setProjectStatus,
         setFocusProject,
         deleteProject,
+        completeProjectStep,
         toggleHabitDate,
         setHabitDuration,
         addHabit,

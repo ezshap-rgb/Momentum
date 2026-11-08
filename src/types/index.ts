@@ -37,6 +37,7 @@ export interface Project {
   status: ProjectStatus;
   current_position: string;
   next_step: string;
+  upcoming_steps?: string[];
   last_updated: number; // ms timestamp
   review_interval_days: number; // default 7
   history: ProjectHistoryEntry[];
