@@ -388,9 +388,8 @@ export function syncTasksIntoBoard(
 
       const taskId = task.id;
 
-      // Skip anything explicitly deleted or completed locally
+      // Skip anything explicitly deleted by ID
       if (taskId && deletedTaskIds.has(taskId)) continue;
-      if (deletedTaskIds.has(rawTitle.toLowerCase())) continue;
 
       const noteSteps = parseStepsFromNotes(task.notes);
 
@@ -399,9 +398,12 @@ export function syncTasksIntoBoard(
       if (quickMatch) {
         const duration = quickMatch[1].toLowerCase() as QuickJobDuration;
         const cleanTitle = quickMatch[2].trim();
-        const key = taskId || cleanTitle.toLowerCase();
 
-        if (!existingJobKeys.has(key)) {
+        const existing = quickJobs.find(
+          (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanTitle.toLowerCase()
+        );
+
+        if (!existing) {
           quickJobs.unshift({
             id: `gt-qj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             title: cleanTitle,
@@ -412,15 +414,11 @@ export function syncTasksIntoBoard(
             googleTaskListId: listId,
             due: task.due ? task.due.split('T')[0] : null,
           });
-          existingJobKeys.add(key);
           addedQuickJobs++;
         } else {
-          // Update list ID and due date on existing
-          const existing = quickJobs.find((j) => j.googleTaskId === taskId || j.title.toLowerCase().trim() === cleanTitle.toLowerCase());
-          if (existing) {
-            existing.googleTaskListId = listId;
-            if (task.due) existing.due = task.due.split('T')[0];
-          }
+          existing.googleTaskId = taskId;
+          existing.googleTaskListId = listId;
+          if (task.due) existing.due = task.due.split('T')[0];
         }
         continue;
       }
@@ -582,8 +580,11 @@ export function syncTasksIntoBoard(
 
       // 5. UNTAGGED REGULAR TASK: Route to Quick Jobs (5m default) so ADHD user never loses a task
       const cleanGenericTitle = rawTitle;
-      const genericKey = taskId || cleanGenericTitle.toLowerCase();
-      if (!existingJobKeys.has(genericKey)) {
+      const existing = quickJobs.find(
+        (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase()
+      );
+
+      if (!existing) {
         quickJobs.unshift({
           id: `gt-qj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           title: cleanGenericTitle,
@@ -594,14 +595,11 @@ export function syncTasksIntoBoard(
           googleTaskListId: listId,
           due: task.due ? task.due.split('T')[0] : null,
         });
-        existingJobKeys.add(genericKey);
         addedQuickJobs++;
       } else {
-        const existing = quickJobs.find((j) => j.googleTaskId === taskId || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase());
-        if (existing) {
-          existing.googleTaskListId = listId;
-          if (task.due) existing.due = task.due.split('T')[0];
-        }
+        existing.googleTaskId = taskId;
+        existing.googleTaskListId = listId;
+        if (task.due) existing.due = task.due.split('T')[0];
       }
     }
   }

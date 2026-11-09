@@ -189,12 +189,18 @@ const DELETED_GTASKS_KEY = 'momentum_deleted_gtasks_v1';
 export function getDeletedGoogleTaskIds(): Set<string> {
   try {
     const raw = localStorage.getItem(DELETED_GTASKS_KEY);
-    if (raw) return new Set(JSON.parse(raw));
+    if (raw) {
+      const parsed: string[] = JSON.parse(raw);
+      // Clean up any historical title entries (Google Task IDs never contain spaces)
+      const validIds = parsed.filter((id) => typeof id === 'string' && id.trim().length > 0 && !id.includes(' '));
+      return new Set(validIds);
+    }
   } catch {}
   return new Set();
 }
 
 export function recordDeletedGoogleTaskId(taskId: string): void {
+  if (!taskId || taskId.includes(' ')) return; // Never record raw titles as deleted IDs
   try {
     const existing = getDeletedGoogleTaskIds();
     existing.add(taskId);

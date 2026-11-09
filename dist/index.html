@@ -12,7 +12,7 @@
     <link rel="manifest" href="./manifest.json" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <title>Momentum — ADHD Cockpit</title>
-    <script type="module" crossorigin src="./assets/index-m_bWEp9r.js"></script>
+    <script type="module" crossorigin src="./assets/index-2aeLwryW.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-Cx6_msFC.css">
   </head>
   <body class="bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 antialiased selection:bg-purple-600 selection:text-white h-screen overflow-hidden">
@@ -20,7 +20,20 @@
     <script>
       if ('serviceWorker' in navigator && (window.location.protocol.startsWith('http') || window.location.hostname === 'localhost')) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js').catch((err) => {
+          navigator.serviceWorker.register('./sw.js').then((reg) => {
+            reg.update();
+            reg.addEventListener('updatefound', () => {
+              const worker = reg.installing;
+              if (worker) {
+                worker.addEventListener('statechange', () => {
+                  if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('Momentum update detected, reloading...');
+                    window.location.reload();
+                  }
+                });
+              }
+            });
+          }).catch((err) => {
             console.log('SW registration error:', err);
           });
         });

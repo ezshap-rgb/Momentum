@@ -304,7 +304,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             }
           }
-          recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
         }
         return {
           ...prev,
@@ -443,7 +442,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             }
           }
-          recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
         }
         return {
           ...prev,
@@ -561,7 +559,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             }
           }
-          recordDeletedGoogleTaskId(target.name.trim().toLowerCase());
         }
         return {
           ...prev,
@@ -925,30 +922,44 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksConnected: true,
         });
 
-        // 1. PUSH PHASE: Upload any newly added local tasks to Google Tasks
+        // 1. Fetch user's task lists first so we know the primary list ID!
+        const [taskLists, detectedEmail] = await Promise.all([
+          fetchAllGoogleTasks(token),
+          fetchGoogleAccountEmail(token),
+        ]);
+        const primaryListId = taskLists[0]?.listId || '@default';
+
+        // 2. Read latest board data directly from storage (bypasses any stale closure)
+        const currentBoard = loadLocalBoardData();
+
+        // 3. PUSH PHASE: Upload any un-synced local tasks directly into primaryListId
         let totalPushed = 0;
+        let boardAfterPush = currentBoard;
         try {
-          const pushRes = await pushLocalTasksToGoogle(token, boardData);
+          const pushRes = await pushLocalTasksToGoogle(token, currentBoard, primaryListId);
           if (pushRes.pushedCount > 0) {
             totalPushed = pushRes.pushedCount;
-            updateBoard(() => pushRes.updatedBoard);
+            boardAfterPush = pushRes.updatedBoard;
+            saveLocalBoardData(boardAfterPush);
           }
         } catch (pushErr) {
           console.warn('Failed pushing local tasks to Google Tasks:', pushErr);
         }
 
-        // 2. PULL PHASE: Download active Google Tasks and reconcile board
-        const [taskLists, detectedEmail] = await Promise.all([
-          fetchAllGoogleTasks(token),
-          fetchGoogleAccountEmail(token),
-        ]);
+        // 4. If we pushed tasks, re-fetch active tasks from Google so reconciliation gets the exact latest state
+        let activeTaskLists = taskLists;
+        if (totalPushed > 0) {
+          try {
+            activeTaskLists = await fetchAllGoogleTasks(token);
+          } catch {}
+        }
 
-        const listsSummary = taskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', ');
+        const listsSummary = activeTaskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', ');
         let totalAdded = 0;
         let totalRemoved = 0;
 
-        updateBoard((prev) => {
-          const result = syncTasksIntoBoard(prev, taskLists, cleanOrphanedDemoTasks);
+        updateBoard(() => {
+          const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks);
           totalAdded = result.totalSynced;
           totalRemoved = result.removedTasks;
           return result.updatedBoard;
@@ -964,7 +975,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksConnected: true,
           googleTasksLastSync: Date.now(),
           googleTasksAccountEmail: effectiveEmail,
-          googleTasksSyncedLists: taskLists.map((l) => `${l.listTitle}: ${l.tasks.length} active`),
+          googleTasksSyncedLists: activeTaskLists.map((l) => `${l.listTitle}: ${l.tasks.length} active`),
         });
 
         return {
