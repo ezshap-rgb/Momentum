@@ -33,6 +33,7 @@ import {
   fetchAllGoogleTasks,
   fetchGoogleAccountEmail,
   syncTasksIntoBoard,
+  pushLocalTasksToGoogle,
   clearStoredAccessToken,
   markGoogleTaskCompleted,
   deleteGoogleTask,
@@ -58,6 +59,7 @@ interface MomentumContextType {
   ) => Promise<{
     success: boolean;
     count: number;
+    pushedCount?: number;
     removedCount?: number;
     error?: string;
     accountEmail?: string;
@@ -858,6 +860,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ): Promise<{
       success: boolean;
       count: number;
+      pushedCount?: number;
       removedCount?: number;
       error?: string;
       accountEmail?: string;
@@ -922,6 +925,19 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksConnected: true,
         });
 
+        // 1. PUSH PHASE: Upload any newly added local tasks to Google Tasks
+        let totalPushed = 0;
+        try {
+          const pushRes = await pushLocalTasksToGoogle(token, boardData);
+          if (pushRes.pushedCount > 0) {
+            totalPushed = pushRes.pushedCount;
+            updateBoard(() => pushRes.updatedBoard);
+          }
+        } catch (pushErr) {
+          console.warn('Failed pushing local tasks to Google Tasks:', pushErr);
+        }
+
+        // 2. PULL PHASE: Download active Google Tasks and reconcile board
         const [taskLists, detectedEmail] = await Promise.all([
           fetchAllGoogleTasks(token),
           fetchGoogleAccountEmail(token),
@@ -938,7 +954,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return result.updatedBoard;
         });
 
-        if (totalAdded > 0 || totalRemoved > 0) {
+        if (totalAdded > 0 || totalRemoved > 0 || totalPushed > 0) {
           soundService.playSuccessChime();
         }
 
@@ -954,6 +970,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           success: true,
           count: totalAdded,
+          pushedCount: totalPushed,
           removedCount: totalRemoved,
           accountEmail: effectiveEmail,
           listsSummary,

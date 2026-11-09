@@ -116,12 +116,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
               const res = await syncGoogleTasks();
               if (res.success) {
                 const parts: string[] = [];
-                if (res.count > 0) parts.push(`✓ Synced ${res.count} new task${res.count === 1 ? '' : 's'}`);
-                if (res.removedCount && res.removedCount > 0) parts.push(`✓ Removed ${res.removedCount} deleted/completed task${res.removedCount === 1 ? '' : 's'}`);
+                if (res.pushedCount && res.pushedCount > 0) parts.push(`✓ Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'} to Google Tasks`);
+                if (res.count > 0) parts.push(`✓ Synced ${res.count} from Google`);
+                if (res.removedCount && res.removedCount > 0) parts.push(`✓ Removed ${res.removedCount} deleted/completed`);
                 const accountDetail = res.accountEmail ? `\nConnected Account: ${res.accountEmail}` : '';
                 const listDetail = res.listsSummary ? `\nGoogle Task Lists: ${res.listsSummary}` : '';
 
-                if (res.count === 0 && (!res.removedCount || res.removedCount === 0)) {
+                if (res.count === 0 && (!res.removedCount || res.removedCount === 0) && (!res.pushedCount || res.pushedCount === 0)) {
                   alert(
                     `Connected to Google Tasks: 0 changes.\n${accountDetail}${listDetail}\n\nYour cockpit is 100% in sync with Google Tasks.`
                   );

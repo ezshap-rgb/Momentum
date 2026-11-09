@@ -87,7 +87,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     const res = await syncGoogleTasks(gtasksClientId.trim());
     if (res.success) {
       const parts: string[] = [];
-      if (res.count > 0) parts.push(`Synced ${res.count} task${res.count === 1 ? '' : 's'}`);
+      if (res.pushedCount && res.pushedCount > 0) parts.push(`Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'}`);
+      if (res.count > 0) parts.push(`Synced ${res.count} from Google`);
       if (res.removedCount && res.removedCount > 0) parts.push(`Removed ${res.removedCount} deleted/completed`);
       const accountStr = res.accountEmail ? ` (${res.accountEmail})` : '';
       setSyncFeedback({
