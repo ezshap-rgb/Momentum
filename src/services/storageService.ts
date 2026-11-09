@@ -116,6 +116,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   googleCalendarEmbedUrl: '',
   googleTasksClientId: '',
   googleTasksEmail: '',
+  googleTasksAccountEmail: '',
+  googleTasksSyncedLists: [],
   googleTasksWebhookUrl: '',
   googleTasksConnected: false,
   googleTasksAutoSync: false,

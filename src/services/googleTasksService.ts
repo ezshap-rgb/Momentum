@@ -36,6 +36,8 @@ export interface GoogleTaskItem {
   due?: string; // RFC 3339 timestamp
   status: 'needsAction' | 'completed';
   updated: string;
+  deleted?: boolean;
+  hidden?: boolean;
 }
 
 export interface GoogleTaskList {
@@ -159,7 +161,18 @@ export async function requestGoogleTasksAuth(
   });
 }
 
-export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId: string; tasks: GoogleTaskItem[] }[]> {
+export async function fetchGoogleAccountEmail(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.email || null;
+    }
+  } catch {}
+  return null;
+}
+
+export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId: string; listTitle: string; tasks: GoogleTaskItem[] }[]> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
 
@@ -188,7 +201,7 @@ export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId
     const taskLists: GoogleTaskList[] = listsData.items || [];
 
     // 2. Fetch tasks for each list
-    const results: { listId: string; tasks: GoogleTaskItem[] }[] = [];
+    const results: { listId: string; listTitle: string; tasks: GoogleTaskItem[] }[] = [];
 
     for (const list of taskLists) {
       const tasksRes = await fetch(
@@ -201,8 +214,16 @@ export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId
 
       if (tasksRes.ok) {
         const data = await tasksRes.json();
-        const items: GoogleTaskItem[] = data.items || [];
-        results.push({ listId: list.id, tasks: items });
+        const rawItems: any[] = data.items || [];
+        // Strictly exclude completed, deleted, and hidden tasks
+        const items: GoogleTaskItem[] = rawItems.filter(
+          (t) => !t.deleted && t.status !== 'completed' && !t.hidden
+        );
+        results.push({
+          listId: list.id,
+          listTitle: list.title || 'My Tasks',
+          tasks: items,
+        });
       }
     }
 
@@ -222,6 +243,7 @@ export interface SyncTasksResult {
   addedResponsibilities: number;
   addedProjects: number;
   addedHabits: number;
+  removedTasks: number;
   totalSynced: number;
   updatedBoard: MomentumBoardData;
 }
@@ -251,24 +273,107 @@ export function parseStepsFromNotes(notes?: string | null): string[] {
 }
 
 /**
- * Intelligent parser that converts Google Tasks into Momentum's 4 ADHD buckets.
+ * Intelligent parser & two-way synchronizer that:
+ * 1. Prunes tasks that were deleted or completed in Google Tasks.
+ * 2. Ingests new tasks and updates existing tasks across Momentum's 4 ADHD buckets.
  */
 export function syncTasksIntoBoard(
   boardData: MomentumBoardData,
-  taskLists: { listId: string; tasks: GoogleTaskItem[] }[]
+  taskLists: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[],
+  cleanOrphanedDemoTasks = false
 ): SyncTasksResult {
   let addedQuickJobs = 0;
   let addedResponsibilities = 0;
   let addedProjects = 0;
   let addedHabits = 0;
+  let removedTasks = 0;
 
-  const quickJobs = [...boardData.quick_jobs];
-  const responsibilities = [...boardData.responsibilities];
-  const projects = [...boardData.projects];
-  const habits = [...boardData.habits];
+  // 1. Build map of all active Google Tasks
+  const activeGoogleTasks = new Map<string, { listId: string; listTitle?: string; task: GoogleTaskItem }>();
+  for (const { listId, listTitle, tasks } of taskLists) {
+    for (const task of tasks) {
+      if (task.id && !task.deleted && task.status !== 'completed' && !task.hidden) {
+        activeGoogleTasks.set(task.id, { listId, listTitle, task });
+      }
+    }
+  }
 
   // Load deleted IDs so completed / deleted tasks are NEVER resurrected
   const deletedTaskIds = getDeletedGoogleTaskIds();
+
+  // 2. TWO-WAY PRUNING:
+  // If a task was linked to Google Tasks (or cleanOrphanedDemoTasks is on) and no longer exists in Google Tasks, remove it!
+  const quickJobs = boardData.quick_jobs.filter((j) => {
+    if (j.googleTaskId && !activeGoogleTasks.has(j.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+    if (j.id.startsWith('gt-qj-')) {
+      const gId = j.googleTaskId;
+      if (!gId || !activeGoogleTasks.has(gId)) {
+        removedTasks++;
+        return false;
+      }
+    }
+    if (cleanOrphanedDemoTasks && (j.id === 'qj-1' || j.id === 'qj-2')) {
+      removedTasks++;
+      return false;
+    }
+    return true;
+  });
+
+  const responsibilities = boardData.responsibilities.filter((r) => {
+    if (r.googleTaskId && !activeGoogleTasks.has(r.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+    if (r.id.startsWith('gt-resp-')) {
+      const gId = r.googleTaskId;
+      if (!gId || !activeGoogleTasks.has(gId)) {
+        removedTasks++;
+        return false;
+      }
+    }
+    if (cleanOrphanedDemoTasks && r.id === 'resp-1') {
+      removedTasks++;
+      return false;
+    }
+    return true;
+  });
+
+  const projects = boardData.projects.filter((p) => {
+    if (p.googleTaskId && !activeGoogleTasks.has(p.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+    if (p.id.startsWith('gt-proj-')) {
+      const gId = p.googleTaskId;
+      if (!gId || !activeGoogleTasks.has(gId)) {
+        removedTasks++;
+        return false;
+      }
+    }
+    if (cleanOrphanedDemoTasks && (p.id === 'proj-1' || p.id === 'proj-2')) {
+      removedTasks++;
+      return false;
+    }
+    return true;
+  });
+
+  const habits = boardData.habits.filter((h) => {
+    if (h.googleTaskId && !activeGoogleTasks.has(h.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+    if (h.id.startsWith('gt-hab-')) {
+      const gId = h.googleTaskId;
+      if (!gId || !activeGoogleTasks.has(gId)) {
+        removedTasks++;
+        return false;
+      }
+    }
+    return true;
+  });
 
   // Helper set of existing task titles and googleTaskIds to avoid duplicates
   const existingJobKeys = new Set(quickJobs.map((j) => j.googleTaskId || j.title.toLowerCase().trim()));
@@ -276,7 +381,7 @@ export function syncTasksIntoBoard(
   const existingProjKeys = new Set(projects.map((p) => p.googleTaskId || p.name.toLowerCase().trim()));
   const existingHabitKeys = new Set(habits.map((h) => h.googleTaskId || h.name.toLowerCase().trim()));
 
-  for (const { tasks } of taskLists) {
+  for (const { listId, tasks } of taskLists) {
     for (const task of tasks) {
       const rawTitle = (task.title || '').trim();
       if (!rawTitle) continue;
@@ -304,10 +409,18 @@ export function syncTasksIntoBoard(
             done: false,
             createdAt: Date.now(),
             googleTaskId: taskId,
+            googleTaskListId: listId,
             due: task.due ? task.due.split('T')[0] : null,
           });
           existingJobKeys.add(key);
           addedQuickJobs++;
+        } else {
+          // Update list ID and due date on existing
+          const existing = quickJobs.find((j) => j.googleTaskId === taskId || j.title.toLowerCase().trim() === cleanTitle.toLowerCase());
+          if (existing) {
+            existing.googleTaskListId = listId;
+            if (task.due) existing.due = task.due.split('T')[0];
+          }
         }
         continue;
       }
@@ -351,10 +464,17 @@ export function syncTasksIntoBoard(
             status: 'active',
             createdAt: Date.now(),
             googleTaskId: taskId,
+            googleTaskListId: listId,
             due: task.due ? task.due.split('T')[0] : null,
           });
           existingRespKeys.add(key);
           addedResponsibilities++;
+        } else {
+          const existing = responsibilities.find((r) => r.googleTaskId === taskId || r.title.toLowerCase().trim() === respTitle.toLowerCase());
+          if (existing) {
+            existing.googleTaskListId = listId;
+            if (task.due) existing.due = task.due.split('T')[0];
+          }
         }
         continue;
       }
@@ -373,9 +493,15 @@ export function syncTasksIntoBoard(
             next_due: 'Daily',
             log: {},
             googleTaskId: taskId,
+            googleTaskListId: listId,
           });
           existingHabitKeys.add(key);
           addedHabits++;
+        } else {
+          const existing = habits.find((h) => h.googleTaskId === taskId || h.name.toLowerCase().trim() === habitName.toLowerCase());
+          if (existing) {
+            existing.googleTaskListId = listId;
+          }
         }
         continue;
       }
@@ -441,9 +567,15 @@ export function syncTasksIntoBoard(
               },
             ],
             googleTaskId: taskId,
+            googleTaskListId: listId,
           });
           existingProjKeys.add(key);
           addedProjects++;
+        } else {
+          const existing = projects.find((p) => p.googleTaskId === taskId || p.name.toLowerCase().trim() === projName.toLowerCase());
+          if (existing) {
+            existing.googleTaskListId = listId;
+          }
         }
         continue;
       }
@@ -459,10 +591,17 @@ export function syncTasksIntoBoard(
           done: false,
           createdAt: Date.now(),
           googleTaskId: taskId,
+          googleTaskListId: listId,
           due: task.due ? task.due.split('T')[0] : null,
         });
         existingJobKeys.add(genericKey);
         addedQuickJobs++;
+      } else {
+        const existing = quickJobs.find((j) => j.googleTaskId === taskId || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase());
+        if (existing) {
+          existing.googleTaskListId = listId;
+          if (task.due) existing.due = task.due.split('T')[0];
+        }
       }
     }
   }
@@ -474,6 +613,7 @@ export function syncTasksIntoBoard(
     addedResponsibilities,
     addedProjects,
     addedHabits,
+    removedTasks,
     totalSynced,
     updatedBoard: {
       ...boardData,
@@ -494,8 +634,9 @@ export async function markGoogleTaskCompleted(
   taskId: string
 ): Promise<void> {
   try {
-    await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+    const targetList = listId || '@default';
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks/${encodeURIComponent(taskId)}`,
       {
         method: 'PATCH',
         headers: {
@@ -505,6 +646,26 @@ export async function markGoogleTaskCompleted(
         body: JSON.stringify({ status: 'completed' }),
       }
     );
+    if (!res.ok && res.status === 404) {
+      try {
+        const allLists = await fetchAllGoogleTasks(accessToken);
+        for (const l of allLists) {
+          if (l.listId !== targetList) {
+            await fetch(
+              `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(l.listId)}/tasks/${encodeURIComponent(taskId)}`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ status: 'completed' }),
+              }
+            );
+          }
+        }
+      } catch {}
+    }
   } catch (e) {
     console.warn('Failed to mark task completed on Google Tasks:', e);
   }
@@ -519,8 +680,9 @@ export async function deleteGoogleTask(
   taskId: string
 ): Promise<void> {
   try {
-    await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+    const targetList = listId || '@default';
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks/${encodeURIComponent(taskId)}`,
       {
         method: 'DELETE',
         headers: {
@@ -528,6 +690,22 @@ export async function deleteGoogleTask(
         },
       }
     );
+    if (!res.ok && res.status === 404) {
+      try {
+        const allLists = await fetchAllGoogleTasks(accessToken);
+        for (const l of allLists) {
+          if (l.listId !== targetList) {
+            await fetch(
+              `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(l.listId)}/tasks/${encodeURIComponent(taskId)}`,
+              {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }
+            );
+          }
+        }
+      } catch {}
+    }
   } catch (e) {
     console.warn('Failed to delete task from Google Tasks:', e);
   }

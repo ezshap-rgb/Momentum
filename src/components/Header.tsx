@@ -115,13 +115,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
               }
               const res = await syncGoogleTasks();
               if (res.success) {
-                if (res.count === 0) {
+                const parts: string[] = [];
+                if (res.count > 0) parts.push(`✓ Synced ${res.count} new task${res.count === 1 ? '' : 's'}`);
+                if (res.removedCount && res.removedCount > 0) parts.push(`✓ Removed ${res.removedCount} deleted/completed task${res.removedCount === 1 ? '' : 's'}`);
+                const accountDetail = res.accountEmail ? `\nConnected Account: ${res.accountEmail}` : '';
+                const listDetail = res.listsSummary ? `\nGoogle Task Lists: ${res.listsSummary}` : '';
+
+                if (res.count === 0 && (!res.removedCount || res.removedCount === 0)) {
                   alert(
-                    'Connected to Google Tasks, but 0 active tasks were found.\n\n' +
-                    'Try creating a task from your phone with Gemini (e.g. "@momentum Add a 5m job: Test"), then click Sync Tasks again!'
+                    `Connected to Google Tasks: 0 changes.\n${accountDetail}${listDetail}\n\nYour cockpit is 100% in sync with Google Tasks.`
                   );
                 } else {
-                  alert(`✓ Successfully synced ${res.count} task${res.count === 1 ? '' : 's'} into your cockpit!`);
+                  alert(`${parts.join(' | ')}${accountDetail}${listDetail}`);
                 }
               } else if (res.error) {
                 alert(`Sync note: ${res.error}`);

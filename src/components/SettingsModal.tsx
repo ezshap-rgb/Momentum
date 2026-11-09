@@ -86,14 +86,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     });
     const res = await syncGoogleTasks(gtasksClientId.trim());
     if (res.success) {
+      const parts: string[] = [];
+      if (res.count > 0) parts.push(`Synced ${res.count} task${res.count === 1 ? '' : 's'}`);
+      if (res.removedCount && res.removedCount > 0) parts.push(`Removed ${res.removedCount} deleted/completed`);
+      const accountStr = res.accountEmail ? ` (${res.accountEmail})` : '';
       setSyncFeedback({
         type: 'success',
-        message: `✓ Connected! Synced ${res.count} task${res.count === 1 ? '' : 's'} into your cockpit panels.`,
+        message: `✓ Connected${accountStr}! ${parts.join(' | ') || 'All tasks are in sync.'}`,
       });
     } else {
       setSyncFeedback({
         type: 'error',
         message: res.error || 'Failed to authenticate with Google.',
+      });
+    }
+  };
+
+  const handleCleanReconcileSync = async () => {
+    updateSettings({
+      googleTasksClientId: gtasksClientId.trim(),
+      googleTasksEmail: gtasksEmail.trim(),
+      googleTasksAutoSync: gtasksAutoSync,
+    });
+    const res = await syncGoogleTasks(gtasksClientId.trim(), true);
+    if (res.success) {
+      const parts: string[] = [];
+      if (res.count > 0) parts.push(`Synced ${res.count} active task${res.count === 1 ? '' : 's'}`);
+      if (res.removedCount && res.removedCount > 0) parts.push(`Removed ${res.removedCount} orphaned/deleted task${res.removedCount === 1 ? '' : 's'}`);
+      const accountStr = res.accountEmail ? ` (${res.accountEmail})` : '';
+      setSyncFeedback({
+        type: 'success',
+        message: `✓ Reconciled${accountStr}! ${parts.join(' | ') || 'Cockpit strictly matches Google Tasks.'}`,
+      });
+    } else {
+      setSyncFeedback({
+        type: 'error',
+        message: res.error || 'Failed to reconcile tasks.',
       });
     }
   };
@@ -384,6 +412,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </label>
               )}
             </div>
+
+            {/* Connected Account & Two-Way Sync Details */}
+            {settings.googleTasksConnected && (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] space-y-2 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Connected Account:</span>
+                  <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                    {settings.googleTasksAccountEmail || settings.googleTasksEmail || 'Active'}
+                  </span>
+                </div>
+                {settings.googleTasksSyncedLists && settings.googleTasksSyncedLists.length > 0 && (
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-slate-500 shrink-0">Active Lists:</span>
+                    <span className="font-mono text-[10px] text-right text-slate-600 dark:text-slate-400">
+                      {settings.googleTasksSyncedLists.join(' • ')}
+                    </span>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-500 leading-tight">
+                    Deleted tasks on desktop or Google? Purge obsolete local demo tasks to match:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCleanReconcileSync}
+                    disabled={isSyncingTasks}
+                    className="shrink-0 px-2.5 py-1 rounded bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-[10px] transition"
+                  >
+                    Clean & Reconcile
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* GEMINI API SETTINGS */}

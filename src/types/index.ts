@@ -8,6 +8,7 @@ export interface QuickJob {
   done: boolean;
   createdAt: number;
   googleTaskId?: string;
+  googleTaskListId?: string;
 }
 
 export type ResponsibilityStatus = 'active' | 'waiting' | 'paused' | 'done';
@@ -21,6 +22,7 @@ export interface Responsibility {
   status: ResponsibilityStatus;
   createdAt: number;
   googleTaskId?: string;
+  googleTaskListId?: string;
 }
 
 export type ProjectStatus = 'moving' | 'attention_needed' | 'waiting' | 'parked' | 'completed';
@@ -42,6 +44,7 @@ export interface Project {
   review_interval_days: number; // default 7
   history: ProjectHistoryEntry[];
   googleTaskId?: string;
+  googleTaskListId?: string;
 }
 
 export type HabitType = 'boolean' | 'duration_min';
@@ -54,6 +57,7 @@ export interface Habit {
   next_due?: string | null; // e.g. "Tonight by 11:30 PM", "Daily 8:00 AM"
   log: Record<string, boolean | number>; // YYYY-MM-DD -> value
   googleTaskId?: string;
+  googleTaskListId?: string;
 }
 
 export interface CalendarEvent {
@@ -99,6 +103,8 @@ export interface AppSettings {
   googleCalendarEmbedUrl?: string; // Optional Google Calendar embed URL
   googleTasksClientId?: string;    // Google OAuth 2.0 Client ID for Google Tasks
   googleTasksEmail?: string;       // Optional user Google email for seamless GIS re-auth
+  googleTasksAccountEmail?: string;// Detected authenticated Google Account email
+  googleTasksSyncedLists?: string[];// Summary of synced task lists
   googleTasksWebhookUrl?: string;  // Optional Google Apps Script webhook for permanent 0-login sync
   googleTasksConnected?: boolean;
   googleTasksAutoSync?: boolean;

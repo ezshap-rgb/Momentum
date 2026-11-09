@@ -31,6 +31,7 @@ import {
   getStoredAccessToken,
   requestGoogleTasksAuth,
   fetchAllGoogleTasks,
+  fetchGoogleAccountEmail,
   syncTasksIntoBoard,
   clearStoredAccessToken,
   markGoogleTaskCompleted,
@@ -51,7 +52,17 @@ interface MomentumContextType {
   toggleLayoutMode: () => void;
   // Google Tasks
   isSyncingTasks: boolean;
-  syncGoogleTasks: (clientIdOverride?: string) => Promise<{ success: boolean; count: number; error?: string }>;
+  syncGoogleTasks: (
+    clientIdOverride?: string,
+    cleanOrphanedDemoTasks?: boolean
+  ) => Promise<{
+    success: boolean;
+    count: number;
+    removedCount?: number;
+    error?: string;
+    accountEmail?: string;
+    listsSummary?: string;
+  }>;
   disconnectGoogleTasks: () => void;
   // Panel Levels
   panelStates: PanelStates;
@@ -259,7 +270,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else {
               const token = getStoredAccessToken();
               if (token) {
-                markGoogleTaskCompleted(token, '@default', target.googleTaskId);
+                markGoogleTaskCompleted(token, target.googleTaskListId || '@default', target.googleTaskId);
               }
             }
           }
@@ -287,7 +298,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else {
               const token = getStoredAccessToken();
               if (token) {
-                deleteGoogleTask(token, '@default', target.googleTaskId);
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
               }
             }
           }
@@ -339,7 +350,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else {
               const token = getStoredAccessToken();
               if (token) {
-                markGoogleTaskCompleted(token, '@default', r.googleTaskId);
+                markGoogleTaskCompleted(token, r.googleTaskListId || '@default', r.googleTaskId);
               }
             }
           }
@@ -426,7 +437,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else {
               const token = getStoredAccessToken();
               if (token) {
-                deleteGoogleTask(token, '@default', target.googleTaskId);
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
               }
             }
           }
@@ -544,7 +555,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else {
               const token = getStoredAccessToken();
               if (token) {
-                deleteGoogleTask(token, '@default', target.googleTaskId);
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
               }
             }
           }
@@ -841,21 +852,33 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [isSyncingTasks]);
 
   const syncGoogleTasks = useCallback(
-    async (clientIdOverride?: string): Promise<{ success: boolean; count: number; error?: string }> => {
+    async (
+      clientIdOverride?: string,
+      cleanOrphanedDemoTasks = false
+    ): Promise<{
+      success: boolean;
+      count: number;
+      removedCount?: number;
+      error?: string;
+      accountEmail?: string;
+      listsSummary?: string;
+    }> => {
       // 1. If Webhook Relay is configured: 100% Zero-Login Permanent Sync!
       if (settings.googleTasksWebhookUrl) {
         setIsSyncingTasks(true);
         try {
           const taskLists = await fetchGoogleTasksFromWebhook(settings.googleTasksWebhookUrl);
           let totalAdded = 0;
+          let totalRemoved = 0;
 
           updateBoard((prev) => {
-            const result = syncTasksIntoBoard(prev, taskLists);
+            const result = syncTasksIntoBoard(prev, taskLists, cleanOrphanedDemoTasks);
             totalAdded = result.totalSynced;
+            totalRemoved = result.removedTasks;
             return result.updatedBoard;
           });
 
-          if (totalAdded > 0) {
+          if (totalAdded > 0 || totalRemoved > 0) {
             soundService.playSuccessChime();
           }
 
@@ -864,7 +887,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             googleTasksLastSync: Date.now(),
           });
 
-          return { success: true, count: totalAdded };
+          return { success: true, count: totalAdded, removedCount: totalRemoved };
         } catch (err: any) {
           return {
             success: false,
@@ -882,7 +905,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           success: false,
           count: 0,
-          error: 'Please enter your Google OAuth Client ID or Webhook URL in Settings first.',
+          error: 'Please enter your Google OAuth Client ID in Settings first.',
         };
       }
 
@@ -899,25 +922,42 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksConnected: true,
         });
 
-        const taskLists = await fetchAllGoogleTasks(token);
+        const [taskLists, detectedEmail] = await Promise.all([
+          fetchAllGoogleTasks(token),
+          fetchGoogleAccountEmail(token),
+        ]);
+
+        const listsSummary = taskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', ');
         let totalAdded = 0;
+        let totalRemoved = 0;
 
         updateBoard((prev) => {
-          const result = syncTasksIntoBoard(prev, taskLists);
+          const result = syncTasksIntoBoard(prev, taskLists, cleanOrphanedDemoTasks);
           totalAdded = result.totalSynced;
+          totalRemoved = result.removedTasks;
           return result.updatedBoard;
         });
 
-        if (totalAdded > 0) {
+        if (totalAdded > 0 || totalRemoved > 0) {
           soundService.playSuccessChime();
         }
+
+        const effectiveEmail = detectedEmail || settings.googleTasksEmail || '';
 
         updateSettings({
           googleTasksConnected: true,
           googleTasksLastSync: Date.now(),
+          googleTasksAccountEmail: effectiveEmail,
+          googleTasksSyncedLists: taskLists.map((l) => `${l.listTitle}: ${l.tasks.length} active`),
         });
 
-        return { success: true, count: totalAdded };
+        return {
+          success: true,
+          count: totalAdded,
+          removedCount: totalRemoved,
+          accountEmail: effectiveEmail,
+          listsSummary,
+        };
       } catch (err: any) {
         return {
           success: false,
