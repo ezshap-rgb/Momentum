@@ -62,6 +62,7 @@ interface MomentumContextType {
     pushedCount?: number;
     removedCount?: number;
     error?: string;
+    errors?: string[];
     accountEmail?: string;
     listsSummary?: string;
   }>;
@@ -860,6 +861,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       pushedCount?: number;
       removedCount?: number;
       error?: string;
+      errors?: string[];
       accountEmail?: string;
       listsSummary?: string;
     }> => {
@@ -934,16 +936,18 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         // 3. PUSH PHASE: Upload any un-synced local tasks directly into primaryListId
         let totalPushed = 0;
+        let pushErrors: string[] = [];
         let boardAfterPush = currentBoard;
         try {
           const pushRes = await pushLocalTasksToGoogle(token, currentBoard, primaryListId);
+          pushErrors = pushRes.errors || [];
           if (pushRes.pushedCount > 0) {
             totalPushed = pushRes.pushedCount;
             boardAfterPush = pushRes.updatedBoard;
             saveLocalBoardData(boardAfterPush);
           }
-        } catch (pushErr) {
-          console.warn('Failed pushing local tasks to Google Tasks:', pushErr);
+        } catch (pushErr: any) {
+          pushErrors.push(pushErr?.message || String(pushErr));
         }
 
         // 4. If we pushed tasks, re-fetch active tasks from Google so reconciliation gets the exact latest state
@@ -985,6 +989,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           removedCount: totalRemoved,
           accountEmail: effectiveEmail,
           listsSummary,
+          errors: pushErrors.length > 0 ? pushErrors : undefined,
         };
       } catch (err: any) {
         return {

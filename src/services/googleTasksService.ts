@@ -717,63 +717,65 @@ export async function createGoogleTask(
   listId: string,
   title: string,
   notes?: string
-): Promise<string | null> {
-  try {
-    const targetList = listId || '@default';
-    const res = await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          notes: notes || '',
-          status: 'needsAction',
-        }),
-      }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      return data.id || null;
+): Promise<string> {
+  const targetList = !listId || listId === '@default' ? '@default' : listId;
+  const payload: any = {
+    title: title.trim(),
+    status: 'needsAction',
+  };
+  if (notes && notes.trim()) {
+    payload.notes = notes.trim();
+  }
+
+  const res = await fetch(
+    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     }
-    // If '@default' returned 404, query lists and fallback to the first real list
-    if (res.status === 404 && targetList === '@default') {
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    // If target list returned 404, fallback to first real list in users/@me/lists
+    if (res.status === 404) {
       const listsRes = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (listsRes.ok) {
         const listsData = await listsRes.json();
-        const firstList = (listsData.items || [])[0];
-        if (firstList?.id) {
+        const fallbackListId = (listsData.items || [])[0]?.id;
+        if (fallbackListId && fallbackListId !== targetList) {
           const retryRes = await fetch(
-            `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(firstList.id)}/tasks`,
+            `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(fallbackListId)}/tasks`,
             {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                title,
-                notes: notes || '',
-                status: 'needsAction',
-              }),
+              body: JSON.stringify(payload),
             }
           );
           if (retryRes.ok) {
-            const retryData = await retryRes.json();
-            return retryData.id || null;
+            const data = await retryRes.json();
+            return data.id;
           }
         }
       }
     }
-  } catch (e) {
-    console.warn('Failed to create task in Google Tasks:', e);
+    throw new Error(`Google Tasks API create error (${res.status}): ${errText}`);
   }
-  return null;
+
+  const data = await res.json();
+  if (!data?.id) {
+    throw new Error('Google Tasks API returned no task ID.');
+  }
+  return data.id;
 }
 
 /**
@@ -786,8 +788,10 @@ export async function pushLocalTasksToGoogle(
 ): Promise<{
   updatedBoard: MomentumBoardData;
   pushedCount: number;
+  errors: string[];
 }> {
   let pushedCount = 0;
+  const errors: string[] = [];
   const updatedQuickJobs = [...boardData.quick_jobs];
   const updatedResponsibilities = [...boardData.responsibilities];
   const updatedProjects = [...boardData.projects];
@@ -798,15 +802,19 @@ export async function pushLocalTasksToGoogle(
     const job = updatedQuickJobs[i];
     if (!job.googleTaskId && !job.done) {
       if (job.id === 'qj-1' || job.id === 'qj-2') continue;
-      const title = `[${job.duration || '5m'}] ${job.title}`;
-      const taskId = await createGoogleTask(accessToken, defaultListId, title);
-      if (taskId) {
-        updatedQuickJobs[i] = {
-          ...job,
-          googleTaskId: taskId,
-          googleTaskListId: defaultListId,
-        };
-        pushedCount++;
+      try {
+        const title = `[${job.duration || '5m'}] ${job.title}`;
+        const taskId = await createGoogleTask(accessToken, defaultListId, title);
+        if (taskId) {
+          updatedQuickJobs[i] = {
+            ...job,
+            googleTaskId: taskId,
+            googleTaskListId: defaultListId,
+          };
+          pushedCount++;
+        }
+      } catch (err: any) {
+        errors.push(`Quick Job "${job.title}": ${err?.message || err}`);
       }
     }
   }
@@ -816,21 +824,25 @@ export async function pushLocalTasksToGoogle(
     const resp = updatedResponsibilities[i];
     if (!resp.googleTaskId && resp.status === 'active') {
       if (resp.id === 'resp-1') continue;
-      const currentStep = resp.steps[resp.current_step_index] || resp.steps[0] || 'First step';
-      const title = `Resp: ${resp.title} -> ${currentStep}`;
-      const remainingSteps = resp.steps.slice(resp.current_step_index + 1);
-      const notes = remainingSteps.length > 0
-        ? remainingSteps.map((s, idx) => `Step ${idx + 2}: ${s}`).join('\n')
-        : undefined;
+      try {
+        const currentStep = resp.steps[resp.current_step_index] || resp.steps[0] || 'First step';
+        const title = `Resp: ${resp.title} -> ${currentStep}`;
+        const remainingSteps = resp.steps.slice(resp.current_step_index + 1);
+        const notes = remainingSteps.length > 0
+          ? remainingSteps.map((s, idx) => `Step ${idx + 2}: ${s}`).join('\n')
+          : undefined;
 
-      const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
-      if (taskId) {
-        updatedResponsibilities[i] = {
-          ...resp,
-          googleTaskId: taskId,
-          googleTaskListId: defaultListId,
-        };
-        pushedCount++;
+        const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
+        if (taskId) {
+          updatedResponsibilities[i] = {
+            ...resp,
+            googleTaskId: taskId,
+            googleTaskListId: defaultListId,
+          };
+          pushedCount++;
+        }
+      } catch (err: any) {
+        errors.push(`Responsibility "${resp.title}": ${err?.message || err}`);
       }
     }
   }
@@ -840,25 +852,29 @@ export async function pushLocalTasksToGoogle(
     const proj = updatedProjects[i];
     if (!proj.googleTaskId && proj.status !== 'completed' && proj.status !== 'parked') {
       if (proj.id === 'proj-1' || proj.id === 'proj-2') continue;
-      const title = `Project: ${proj.name} | Next: ${proj.next_step}`;
-      const notesLines = [
-        `Where holding: ${proj.current_position || 'Active prototype'}`,
-      ];
-      if (proj.upcoming_steps && proj.upcoming_steps.length > 0) {
-        proj.upcoming_steps.forEach((s, idx) => {
-          notesLines.push(`Step ${idx + 2}: ${s}`);
-        });
-      }
-      const notes = notesLines.join('\n');
+      try {
+        const title = `Project: ${proj.name} | Next: ${proj.next_step}`;
+        const notesLines = [
+          `Where holding: ${proj.current_position || 'Active prototype'}`,
+        ];
+        if (proj.upcoming_steps && proj.upcoming_steps.length > 0) {
+          proj.upcoming_steps.forEach((s, idx) => {
+            notesLines.push(`Step ${idx + 2}: ${s}`);
+          });
+        }
+        const notes = notesLines.join('\n');
 
-      const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
-      if (taskId) {
-        updatedProjects[i] = {
-          ...proj,
-          googleTaskId: taskId,
-          googleTaskListId: defaultListId,
-        };
-        pushedCount++;
+        const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
+        if (taskId) {
+          updatedProjects[i] = {
+            ...proj,
+            googleTaskId: taskId,
+            googleTaskListId: defaultListId,
+          };
+          pushedCount++;
+        }
+      } catch (err: any) {
+        errors.push(`Project "${proj.name}": ${err?.message || err}`);
       }
     }
   }
@@ -868,15 +884,19 @@ export async function pushLocalTasksToGoogle(
     const habit = updatedHabits[i];
     if (!habit.googleTaskId) {
       if (habit.id === 'hab-1' || habit.id === 'hab-2') continue;
-      const title = `Habit: ${habit.name}`;
-      const taskId = await createGoogleTask(accessToken, defaultListId, title);
-      if (taskId) {
-        updatedHabits[i] = {
-          ...habit,
-          googleTaskId: taskId,
-          googleTaskListId: defaultListId,
-        };
-        pushedCount++;
+      try {
+        const title = `Habit: ${habit.name}`;
+        const taskId = await createGoogleTask(accessToken, defaultListId, title);
+        if (taskId) {
+          updatedHabits[i] = {
+            ...habit,
+            googleTaskId: taskId,
+            googleTaskListId: defaultListId,
+          };
+          pushedCount++;
+        }
+      } catch (err: any) {
+        errors.push(`Habit "${habit.name}": ${err?.message || err}`);
       }
     }
   }
@@ -890,6 +910,7 @@ export async function pushLocalTasksToGoogle(
       habits: updatedHabits,
     },
     pushedCount,
+    errors,
   };
 }
 

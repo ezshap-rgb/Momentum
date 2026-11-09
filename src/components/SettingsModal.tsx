@@ -525,31 +525,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           </div>
 
           {/* BACKUP & SAVE */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={handleExportData}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-700 transition"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Backup JSON</span>
-            </button>
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportData}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-700 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Backup JSON</span>
+                </button>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
-              >
-                {isSaved ? <Check className="w-3.5 h-3.5" /> : null}
-                <span>{isSaved ? 'Saved!' : 'Save Settings'}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if ('serviceWorker' in navigator) {
+                      try {
+                        const regs = await navigator.serviceWorker.getRegistrations();
+                        for (const r of regs) await r.unregister();
+                      } catch {}
+                    }
+                    if ('caches' in window) {
+                      try {
+                        const keys = await caches.keys();
+                        for (const k of keys) await caches.delete(k);
+                      } catch {}
+                    }
+                    window.location.reload();
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-[11px] font-medium border border-slate-200 dark:border-slate-700 transition"
+                  title="Clear Service Worker cache and fetch latest version from GitHub"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Force Update App</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+                >
+                  {isSaved ? <Check className="w-3.5 h-3.5" /> : null}
+                  <span>{isSaved ? 'Saved!' : 'Save Settings'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
+              Momentum v2.2 • Build 2026-11-10 01:25 AM • Two-Way Sync Active
             </div>
           </div>
         </form>
