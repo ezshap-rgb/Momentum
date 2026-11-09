@@ -13,10 +13,17 @@ import { Zap, Activity, Layers, Compass, Mic } from 'lucide-react';
 function CockpitDashboard() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [mobileTab, setMobileTab] = useState<'quick' | 'habits' | 'bigger' | 'projects'>('quick');
   const { panelStates, boardData, layoutMode } = useMomentum();
 
   const showCalendar = panelStates.calendar !== 'hidden';
+
+  React.useEffect(() => {
+    const handleUpdate = () => setUpdateAvailable(true);
+    window.addEventListener('momentumUpdateAvailable', handleUpdate);
+    return () => window.removeEventListener('momentumUpdateAvailable', handleUpdate);
+  }, []);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -45,6 +52,31 @@ function CockpitDashboard() {
 
   return (
     <div className="h-screen max-h-screen w-screen overflow-hidden flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 selection:bg-purple-600 selection:text-white transition-colors">
+      {/* Update notification banner if a new version is installed in background */}
+      {updateAvailable && (
+        <div className="bg-purple-600 text-white px-3 py-1.5 text-xs flex items-center justify-between z-50 shrink-0 shadow-md">
+          <span className="font-medium">⚡ Momentum updated! Tap to reload latest version.</span>
+          <button
+            onClick={() => {
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistration().then((reg) => {
+                  if (reg?.waiting) {
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                  } else {
+                    window.location.reload();
+                  }
+                });
+              } else {
+                window.location.reload();
+              }
+            }}
+            className="ml-2 px-2.5 py-0.5 bg-white text-purple-700 font-bold rounded shadow-xs hover:bg-purple-50 active:scale-95 transition"
+          >
+            Update Now
+          </button>
+        </div>
+      )}
+
       {/* Header (Top Bar with Theme, Voice Ingest, Calendar Toggle, Desktop App) */}
       <Header
         onOpenSettings={() => setIsSettingsOpen(true)}

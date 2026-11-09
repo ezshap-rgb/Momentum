@@ -2,6 +2,9 @@
 <html lang="en" class="light">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <link rel="icon" type="image/png" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -12,23 +15,35 @@
     <link rel="manifest" href="./manifest.json" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <title>Momentum — ADHD Cockpit</title>
-    <script type="module" crossorigin src="./assets/index-DmLF2aHY.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DyAtGyaU.css">
+    <script type="module" crossorigin src="./assets/index-BHtoeJ83.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DXWEFk0F.css">
   </head>
   <body class="bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 antialiased selection:bg-purple-600 selection:text-white h-screen overflow-hidden">
     <div id="root" class="h-full"></div>
     <script>
       if ('serviceWorker' in navigator && (window.location.protocol.startsWith('http') || window.location.hostname === 'localhost')) {
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!refreshing) {
+            refreshing = true;
+            window.location.reload();
+          }
+        });
+
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('./sw.js').then((reg) => {
             reg.update();
+            if (reg.waiting) {
+              window.dispatchEvent(new CustomEvent('momentumUpdateAvailable'));
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
             reg.addEventListener('updatefound', () => {
               const worker = reg.installing;
               if (worker) {
                 worker.addEventListener('statechange', () => {
                   if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-                    console.log('Momentum update detected, reloading...');
-                    window.location.reload();
+                    window.dispatchEvent(new CustomEvent('momentumUpdateAvailable'));
+                    worker.postMessage({ type: 'SKIP_WAITING' });
                   }
                 });
               }

@@ -280,7 +280,8 @@ export function parseStepsFromNotes(notes?: string | null): string[] {
 export function syncTasksIntoBoard(
   boardData: MomentumBoardData,
   taskLists: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[],
-  cleanOrphanedDemoTasks = false
+  cleanOrphanedDemoTasks = false,
+  newlyCreatedTaskIds?: Set<string>
 ): SyncTasksResult {
   let addedQuickJobs = 0;
   let addedResponsibilities = 0;
@@ -298,16 +299,53 @@ export function syncTasksIntoBoard(
     }
   }
 
+  // Ensure newly pushed tasks in this sync cycle are immediately recognized as active
+  if (newlyCreatedTaskIds) {
+    for (const id of newlyCreatedTaskIds) {
+      if (!activeGoogleTasks.has(id)) {
+        activeGoogleTasks.set(id, {
+          listId: '@default',
+          task: { id, title: '', status: 'needsAction', updated: new Date().toISOString() },
+        });
+      }
+    }
+  }
+
   // Load deleted IDs so completed / deleted tasks are NEVER resurrected
   const deletedTaskIds = getDeletedGoogleTaskIds();
+
+  // 30-minute grace period: tasks created or updated within 30 minutes are protected from remote pruning
+  const GRACE_PERIOD_MS = 30 * 60 * 1000;
+  const isProtectedFromPruning = (timestamp?: number, googleTaskId?: string) => {
+    if (googleTaskId && newlyCreatedTaskIds && newlyCreatedTaskIds.has(googleTaskId)) {
+      return true;
+    }
+    if (timestamp && Date.now() - timestamp < GRACE_PERIOD_MS) {
+      return true;
+    }
+    return false;
+  };
 
   // 2. TWO-WAY PRUNING:
   // If a task was linked to Google Tasks (or cleanOrphanedDemoTasks is on) and no longer exists in Google Tasks, remove it!
   const quickJobs = boardData.quick_jobs.filter((j) => {
+    // If protected by grace period or just pushed, ALWAYS preserve
+    if (isProtectedFromPruning(j.createdAt, j.googleTaskId)) {
+      return true;
+    }
+
+    // If marked deleted/completed by user in Momentum, prune it
+    if (j.googleTaskId && deletedTaskIds.has(j.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+
+    // If linked to Google Tasks and missing from active Google Tasks (and outside grace period), prune it
     if (j.googleTaskId && !activeGoogleTasks.has(j.googleTaskId)) {
       removedTasks++;
       return false;
     }
+
     if (j.id.startsWith('gt-qj-')) {
       const gId = j.googleTaskId;
       if (!gId || !activeGoogleTasks.has(gId)) {
@@ -315,18 +353,30 @@ export function syncTasksIntoBoard(
         return false;
       }
     }
+
     if (cleanOrphanedDemoTasks && (j.id === 'qj-1' || j.id === 'qj-2')) {
       removedTasks++;
       return false;
     }
+
     return true;
   });
 
   const responsibilities = boardData.responsibilities.filter((r) => {
+    if (isProtectedFromPruning(r.createdAt, r.googleTaskId)) {
+      return true;
+    }
+
+    if (r.googleTaskId && deletedTaskIds.has(r.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+
     if (r.googleTaskId && !activeGoogleTasks.has(r.googleTaskId)) {
       removedTasks++;
       return false;
     }
+
     if (r.id.startsWith('gt-resp-')) {
       const gId = r.googleTaskId;
       if (!gId || !activeGoogleTasks.has(gId)) {
@@ -334,18 +384,30 @@ export function syncTasksIntoBoard(
         return false;
       }
     }
+
     if (cleanOrphanedDemoTasks && r.id === 'resp-1') {
       removedTasks++;
       return false;
     }
+
     return true;
   });
 
   const projects = boardData.projects.filter((p) => {
+    if (isProtectedFromPruning(p.last_updated, p.googleTaskId)) {
+      return true;
+    }
+
+    if (p.googleTaskId && deletedTaskIds.has(p.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+
     if (p.googleTaskId && !activeGoogleTasks.has(p.googleTaskId)) {
       removedTasks++;
       return false;
     }
+
     if (p.id.startsWith('gt-proj-')) {
       const gId = p.googleTaskId;
       if (!gId || !activeGoogleTasks.has(gId)) {
@@ -353,18 +415,30 @@ export function syncTasksIntoBoard(
         return false;
       }
     }
+
     if (cleanOrphanedDemoTasks && (p.id === 'proj-1' || p.id === 'proj-2')) {
       removedTasks++;
       return false;
     }
+
     return true;
   });
 
   const habits = boardData.habits.filter((h) => {
+    if (isProtectedFromPruning(undefined, h.googleTaskId)) {
+      return true;
+    }
+
+    if (h.googleTaskId && deletedTaskIds.has(h.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+
     if (h.googleTaskId && !activeGoogleTasks.has(h.googleTaskId)) {
       removedTasks++;
       return false;
     }
+
     if (h.id.startsWith('gt-hab-')) {
       const gId = h.googleTaskId;
       if (!gId || !activeGoogleTasks.has(gId)) {
@@ -372,6 +446,7 @@ export function syncTasksIntoBoard(
         return false;
       }
     }
+
     return true;
   });
 
@@ -788,9 +863,11 @@ export async function pushLocalTasksToGoogle(
 ): Promise<{
   updatedBoard: MomentumBoardData;
   pushedCount: number;
+  pushedTaskIds: string[];
   errors: string[];
 }> {
   let pushedCount = 0;
+  const pushedTaskIds: string[] = [];
   const errors: string[] = [];
   const updatedQuickJobs = [...boardData.quick_jobs];
   const updatedResponsibilities = [...boardData.responsibilities];
@@ -811,6 +888,7 @@ export async function pushLocalTasksToGoogle(
             googleTaskId: taskId,
             googleTaskListId: defaultListId,
           };
+          pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
@@ -839,6 +917,7 @@ export async function pushLocalTasksToGoogle(
             googleTaskId: taskId,
             googleTaskListId: defaultListId,
           };
+          pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
@@ -871,6 +950,7 @@ export async function pushLocalTasksToGoogle(
             googleTaskId: taskId,
             googleTaskListId: defaultListId,
           };
+          pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
@@ -893,6 +973,7 @@ export async function pushLocalTasksToGoogle(
             googleTaskId: taskId,
             googleTaskListId: defaultListId,
           };
+          pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
@@ -910,6 +991,7 @@ export async function pushLocalTasksToGoogle(
       habits: updatedHabits,
     },
     pushedCount,
+    pushedTaskIds,
     errors,
   };
 }

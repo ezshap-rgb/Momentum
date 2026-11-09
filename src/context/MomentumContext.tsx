@@ -934,6 +934,8 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // 2. Read latest board data directly from storage (bypasses any stale closure)
         const currentBoard = loadLocalBoardData();
 
+        const newlyCreatedTaskIds = new Set<string>();
+
         // 3. PUSH PHASE: Upload any un-synced local tasks directly into primaryListId
         let totalPushed = 0;
         let pushErrors: string[] = [];
@@ -945,6 +947,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             totalPushed = pushRes.pushedCount;
             boardAfterPush = pushRes.updatedBoard;
             saveLocalBoardData(boardAfterPush);
+            (pushRes.pushedTaskIds || []).forEach((id) => newlyCreatedTaskIds.add(id));
           }
         } catch (pushErr: any) {
           pushErrors.push(pushErr?.message || String(pushErr));
@@ -963,7 +966,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         let totalRemoved = 0;
 
         updateBoard(() => {
-          const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks);
+          const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks, newlyCreatedTaskIds);
           totalAdded = result.totalSynced;
           totalRemoved = result.removedTasks;
           return result.updatedBoard;
