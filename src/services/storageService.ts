@@ -115,6 +115,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   geminiModel: 'gemini-3.8-flash',
   googleCalendarEmbedUrl: '',
   googleTasksClientId: '',
+  googleTasksEmail: '',
+  googleTasksWebhookUrl: '',
   googleTasksConnected: false,
   googleTasksAutoSync: false,
   googleTasksLastSync: undefined,

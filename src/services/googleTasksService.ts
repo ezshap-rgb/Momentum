@@ -9,6 +9,7 @@ declare global {
           initTokenClient: (config: {
             client_id: string;
             scope: string;
+            hint?: string;
             callback: (response: GoogleTokenResponse) => void;
             error_callback?: (error: any) => void;
           }) => GoogleTokenClient;
@@ -25,7 +26,7 @@ interface GoogleTokenResponse {
 }
 
 interface GoogleTokenClient {
-  requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
+  requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
 }
 
 export interface GoogleTaskItem {
@@ -44,6 +45,23 @@ export interface GoogleTaskList {
 
 const TOKEN_KEY = 'momentum_gtasks_token';
 const TOKEN_EXPIRY_KEY = 'momentum_gtasks_token_expiry';
+const USER_EMAIL_KEY = 'momentum_gtasks_email';
+
+export function getStoredUserEmail(): string {
+  try {
+    return localStorage.getItem(USER_EMAIL_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveStoredUserEmail(email: string): void {
+  try {
+    if (email && email.includes('@')) {
+      localStorage.setItem(USER_EMAIL_KEY, email.trim());
+    }
+  } catch {}
+}
 
 export function getStoredAccessToken(): string | null {
   try {
@@ -63,10 +81,11 @@ export function getStoredAccessToken(): string | null {
   }
 }
 
-export function saveStoredAccessToken(token: string, expiresInSeconds = 3600): void {
+export function saveStoredAccessToken(token: string, expiresInSeconds: number | string = 3600): void {
   try {
     localStorage.setItem(TOKEN_KEY, token);
-    const expiry = Date.now() + expiresInSeconds * 1000;
+    const seconds = typeof expiresInSeconds === 'string' ? parseInt(expiresInSeconds, 10) : expiresInSeconds;
+    const expiry = Date.now() + (Number.isNaN(seconds) ? 3600 : seconds) * 1000;
     localStorage.setItem(TOKEN_EXPIRY_KEY, expiry.toString());
   } catch (e) {
     console.error('Failed to save Google Tasks token:', e);
@@ -80,7 +99,11 @@ export function clearStoredAccessToken(): void {
   } catch {}
 }
 
-export async function requestGoogleTasksAuth(clientId: string, promptConsent = false): Promise<string> {
+export async function requestGoogleTasksAuth(
+  clientId: string,
+  promptConsent = false,
+  emailHintOverride?: string
+): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts?.oauth2) {
       reject(new Error('Google Identity Services SDK is not loaded yet. Please ensure your browser has internet access.'));
@@ -92,6 +115,8 @@ export async function requestGoogleTasksAuth(clientId: string, promptConsent = f
       return;
     }
 
+    const emailHint = (emailHintOverride || getStoredUserEmail()).trim();
+
     const timeoutId = setTimeout(() => {
       reject(new Error('Google sign-in timed out. Please check if the popup was blocked by your browser or opened behind your window.'));
     }, 25000);
@@ -99,8 +124,9 @@ export async function requestGoogleTasksAuth(clientId: string, promptConsent = f
     try {
       const tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId.trim(),
-        scope: 'https://www.googleapis.com/auth/tasks',
-        callback: (response: GoogleTokenResponse) => {
+        scope: 'https://www.googleapis.com/auth/tasks email',
+        hint: emailHint || undefined,
+        callback: async (response: GoogleTokenResponse) => {
           clearTimeout(timeoutId);
           if (response.error) {
             reject(new Error(response.error));
@@ -108,6 +134,20 @@ export async function requestGoogleTasksAuth(clientId: string, promptConsent = f
           }
           if (response.access_token) {
             saveStoredAccessToken(response.access_token, response.expires_in || 3600);
+
+            // Fetch user email in background so subsequent refreshes skip the account picker
+            try {
+              const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${response.access_token}` },
+              });
+              if (uRes.ok) {
+                const uData = await uRes.json();
+                if (uData.email) {
+                  saveStoredUserEmail(uData.email);
+                }
+              }
+            } catch {}
+
             resolve(response.access_token);
           } else {
             reject(new Error('No access token returned by Google.'));
@@ -119,7 +159,10 @@ export async function requestGoogleTasksAuth(clientId: string, promptConsent = f
         },
       });
 
-      tokenClient.requestAccessToken({ prompt: promptConsent ? 'consent' : '' });
+      tokenClient.requestAccessToken({
+        prompt: promptConsent ? 'consent' : '',
+        hint: emailHint || undefined,
+      });
     } catch (e: any) {
       clearTimeout(timeoutId);
       reject(new Error(e?.message || 'Failed to initialize Google OAuth Token Client.'));
@@ -532,6 +575,89 @@ export async function createGoogleTask(
     }
   } catch (e) {
     console.warn('Failed to create task in Google Tasks:', e);
+  }
+  return null;
+}
+
+/**
+ * Fetch tasks from Google Apps Script Webhook Relay (Zero-login permanent sync)
+ */
+export async function fetchGoogleTasksFromWebhook(
+  webhookUrl: string
+): Promise<{ listId: string; tasks: GoogleTaskItem[] }[]> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      throw new Error(`Webhook returned status ${res.status}`);
+    }
+    const data = await res.json();
+    const items: GoogleTaskItem[] = data.tasks || (Array.isArray(data) ? data : []);
+    return [{ listId: '@default', tasks: items }];
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+/**
+ * Mark a task completed via Google Apps Script Webhook Relay
+ */
+export async function markGoogleTaskCompletedViaWebhook(
+  webhookUrl: string,
+  taskId: string
+): Promise<void> {
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'complete', taskId }),
+    });
+  } catch (e) {
+    console.warn('Webhook complete failed:', e);
+  }
+}
+
+/**
+ * Delete a task via Google Apps Script Webhook Relay
+ */
+export async function deleteGoogleTaskViaWebhook(
+  webhookUrl: string,
+  taskId: string
+): Promise<void> {
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete', taskId }),
+    });
+  } catch (e) {
+    console.warn('Webhook delete failed:', e);
+  }
+}
+
+/**
+ * Create a task via Google Apps Script Webhook Relay
+ */
+export async function createGoogleTaskViaWebhook(
+  webhookUrl: string,
+  title: string,
+  notes?: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'create', title, notes: notes || '' }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data?.task?.id || data?.id || null;
+    }
+  } catch (e) {
+    console.warn('Webhook create failed:', e);
   }
   return null;
 }

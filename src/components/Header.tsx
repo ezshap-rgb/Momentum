@@ -109,7 +109,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
           {/* Prominent Google Tasks Sync Button (Visible everywhere) */}
           <button
             onClick={async () => {
-              if (!settings.googleTasksConnected && !settings.googleTasksClientId) {
+              if (!settings.googleTasksConnected && !settings.googleTasksClientId && !settings.googleTasksWebhookUrl) {
                 onOpenSettings();
                 return;
               }

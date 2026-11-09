@@ -36,6 +36,10 @@ import {
   markGoogleTaskCompleted,
   deleteGoogleTask,
   createGoogleTask,
+  fetchGoogleTasksFromWebhook,
+  markGoogleTaskCompletedViaWebhook,
+  deleteGoogleTaskViaWebhook,
+  createGoogleTaskViaWebhook,
 } from '../services/googleTasksService';
 
 interface MomentumContextType {
@@ -214,10 +218,9 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         quick_jobs: [newJob, ...prev.quick_jobs],
       }));
 
-      // Background push to Google Tasks if connected
-      const token = getStoredAccessToken();
-      if (token && settings.googleTasksConnected) {
-        createGoogleTask(token, '@default', `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+      // Background push to Google Tasks (Webhook or OAuth)
+      if (settings.googleTasksWebhookUrl) {
+        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
           if (taskId) {
             updateBoard((prev) => ({
               ...prev,
@@ -225,9 +228,21 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }));
           }
         });
+      } else {
+        const token = getStoredAccessToken();
+        if (token && settings.googleTasksConnected) {
+          createGoogleTask(token, '@default', `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+            if (taskId) {
+              updateBoard((prev) => ({
+                ...prev,
+                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
+              }));
+            }
+          });
+        }
       }
     },
-    [updateBoard, settings.googleTasksConnected]
+    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl]
   );
 
   const toggleQuickJob = useCallback(
@@ -239,9 +254,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           soundService.playSuccessChime();
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
-            const token = getStoredAccessToken();
-            if (token) {
-              markGoogleTaskCompleted(token, '@default', target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              markGoogleTaskCompletedViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                markGoogleTaskCompleted(token, '@default', target.googleTaskId);
+              }
             }
           }
         }
@@ -253,7 +272,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       });
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   const deleteQuickJob = useCallback(
@@ -263,9 +282,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
-            const token = getStoredAccessToken();
-            if (token) {
-              deleteGoogleTask(token, '@default', target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, '@default', target.googleTaskId);
+              }
             }
           }
           recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
@@ -276,7 +299,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       });
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   // Responsibilities
@@ -311,9 +334,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const isDone = nextIndex >= r.steps.length;
           if (isDone && r.googleTaskId) {
             recordDeletedGoogleTaskId(r.googleTaskId);
-            const token = getStoredAccessToken();
-            if (token) {
-              markGoogleTaskCompleted(token, '@default', r.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              markGoogleTaskCompletedViaWebhook(settings.googleTasksWebhookUrl, r.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                markGoogleTaskCompleted(token, '@default', r.googleTaskId);
+              }
             }
           }
           return {
@@ -324,7 +351,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }),
       }));
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   const regressResponsibilityStep = useCallback(
@@ -394,9 +421,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
-            const token = getStoredAccessToken();
-            if (token) {
-              deleteGoogleTask(token, '@default', target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, '@default', target.googleTaskId);
+              }
             }
           }
           recordDeletedGoogleTaskId(target.title.trim().toLowerCase());
@@ -407,7 +438,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       });
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   // Projects
@@ -508,9 +539,13 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
-            const token = getStoredAccessToken();
-            if (token) {
-              deleteGoogleTask(token, '@default', target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, '@default', target.googleTaskId);
+              }
             }
           }
           recordDeletedGoogleTaskId(target.name.trim().toLowerCase());
@@ -523,7 +558,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       });
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   const completeProjectStep = useCallback(
@@ -807,12 +842,47 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const syncGoogleTasks = useCallback(
     async (clientIdOverride?: string): Promise<{ success: boolean; count: number; error?: string }> => {
+      // 1. If Webhook Relay is configured: 100% Zero-Login Permanent Sync!
+      if (settings.googleTasksWebhookUrl) {
+        setIsSyncingTasks(true);
+        try {
+          const taskLists = await fetchGoogleTasksFromWebhook(settings.googleTasksWebhookUrl);
+          let totalAdded = 0;
+
+          updateBoard((prev) => {
+            const result = syncTasksIntoBoard(prev, taskLists);
+            totalAdded = result.totalSynced;
+            return result.updatedBoard;
+          });
+
+          if (totalAdded > 0) {
+            soundService.playSuccessChime();
+          }
+
+          updateSettings({
+            googleTasksConnected: true,
+            googleTasksLastSync: Date.now(),
+          });
+
+          return { success: true, count: totalAdded };
+        } catch (err: any) {
+          return {
+            success: false,
+            count: 0,
+            error: err?.message || 'Failed to sync via Google Tasks Webhook Relay.',
+          };
+        } finally {
+          setIsSyncingTasks(false);
+        }
+      }
+
+      // 2. Standard Google Identity Services OAuth
       const clientId = clientIdOverride || settings.googleTasksClientId;
       if (!clientId) {
         return {
           success: false,
           count: 0,
-          error: 'Please enter your Google OAuth Client ID in Settings first.',
+          error: 'Please enter your Google OAuth Client ID or Webhook URL in Settings first.',
         };
       }
 
@@ -820,7 +890,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         let token = getStoredAccessToken();
         if (!token) {
-          token = await requestGoogleTasksAuth(clientId);
+          token = await requestGoogleTasksAuth(clientId, false, settings.googleTasksEmail);
         }
 
         // Successfully authenticated with Google
@@ -858,7 +928,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setIsSyncingTasks(false);
       }
     },
-    [settings.googleTasksClientId, updateBoard, updateSettings]
+    [settings.googleTasksClientId, settings.googleTasksWebhookUrl, settings.googleTasksEmail, updateBoard, updateSettings]
   );
 
   const disconnectGoogleTasks = useCallback(() => {
@@ -871,14 +941,33 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Auto-sync Google Tasks every 5 minutes if enabled
   useEffect(() => {
-    if (!settings.googleTasksConnected || !settings.googleTasksAutoSync || !settings.googleTasksClientId) {
-      return;
+    if (!settings.googleTasksAutoSync) return;
+
+    // Webhook mode: always safe to auto-sync in background without logins
+    if (settings.googleTasksWebhookUrl) {
+      const interval = setInterval(() => {
+        syncGoogleTasks();
+      }, 5 * 60 * 1000);
+      return () => clearInterval(interval);
     }
-    const interval = setInterval(() => {
-      syncGoogleTasks();
-    }, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [settings.googleTasksConnected, settings.googleTasksAutoSync, settings.googleTasksClientId, syncGoogleTasks]);
+
+    // OAuth mode: only sync if we have a valid cached token so background timer NEVER pops up OAuth
+    if (settings.googleTasksConnected && settings.googleTasksClientId) {
+      const interval = setInterval(() => {
+        const token = getStoredAccessToken();
+        if (token) {
+          syncGoogleTasks();
+        }
+      }, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [
+    settings.googleTasksConnected,
+    settings.googleTasksAutoSync,
+    settings.googleTasksClientId,
+    settings.googleTasksWebhookUrl,
+    syncGoogleTasks,
+  ]);
 
   return (
     <MomentumContext.Provider

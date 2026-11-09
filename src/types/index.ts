@@ -98,6 +98,8 @@ export interface AppSettings {
   geminiModel: string;
   googleCalendarEmbedUrl?: string; // Optional Google Calendar embed URL
   googleTasksClientId?: string;    // Google OAuth 2.0 Client ID for Google Tasks
+  googleTasksEmail?: string;       // Optional user Google email for seamless GIS re-auth
+  googleTasksWebhookUrl?: string;  // Optional Google Apps Script webhook for permanent 0-login sync
   googleTasksConnected?: boolean;
   googleTasksAutoSync?: boolean;
   googleTasksLastSync?: number;

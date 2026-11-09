@@ -21,6 +21,7 @@ import {
   AlertCircle,
   HelpCircle,
   Trash2,
+  Copy,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -45,9 +46,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   );
   const [googleCalUrl, setGoogleCalUrl] = useState(settings.googleCalendarEmbedUrl || '');
   const [gtasksClientId, setGtasksClientId] = useState(settings.googleTasksClientId || '');
+  const [gtasksEmail, setGtasksEmail] = useState(settings.googleTasksEmail || '');
+  const [gtasksWebhookUrl, setGtasksWebhookUrl] = useState(settings.googleTasksWebhookUrl || '');
   const [gtasksAutoSync, setGtasksAutoSync] = useState(settings.googleTasksAutoSync || false);
   const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showGtasksGuide, setShowGtasksGuide] = useState(false);
+  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
+  const [copiedWebhookScript, setCopiedWebhookScript] = useState(false);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(settings.theme || 'dark');
   const [useCloudSync, setUseCloudSync] = useState(settings.useCloudSync || false);
@@ -66,15 +71,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
 
   const handleConnectGoogleTasks = async () => {
     setSyncFeedback(null);
-    if (!gtasksClientId.trim()) {
+    if (!gtasksWebhookUrl.trim() && !gtasksClientId.trim()) {
       setSyncFeedback({
         type: 'error',
-        message: 'Please enter your Google OAuth 2.0 Client ID below first.',
+        message: 'Please enter your Webhook URL or Google OAuth Client ID below first.',
       });
       return;
     }
     updateSettings({
       googleTasksClientId: gtasksClientId.trim(),
+      googleTasksEmail: gtasksEmail.trim(),
+      googleTasksWebhookUrl: gtasksWebhookUrl.trim(),
       googleTasksAutoSync: gtasksAutoSync,
     });
     const res = await syncGoogleTasks(gtasksClientId.trim());
@@ -93,6 +100,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
 
   const handleDisconnectGoogleTasks = () => {
     disconnectGoogleTasks();
+    updateSettings({
+      googleTasksWebhookUrl: '',
+    });
+    setGtasksWebhookUrl('');
     setSyncFeedback({
       type: 'success',
       message: 'Disconnected from Google Tasks.',
@@ -107,6 +118,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       geminiModel,
       googleCalendarEmbedUrl: normalizeGoogleCalendarUrl(googleCalUrl),
       googleTasksClientId: gtasksClientId.trim(),
+      googleTasksEmail: gtasksEmail.trim(),
+      googleTasksWebhookUrl: gtasksWebhookUrl.trim(),
       googleTasksAutoSync: gtasksAutoSync,
       useCloudSync,
       userBoardId: boardId.trim() || 'main-cockpit',
@@ -251,65 +264,173 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             )}
 
             {/* Client ID input */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Google OAuth 2.0 Web Client ID:
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowGtasksGuide(!showGtasksGuide)}
-                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5"
-                >
-                  <HelpCircle className="w-3 h-3" />
-                  <span>{showGtasksGuide ? 'Hide Setup Guide' : 'How to get this (free 2 min)?'}</span>
-                </button>
+            <div className="space-y-2">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Option A: Google OAuth 2.0 Client ID:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowGtasksGuide(!showGtasksGuide)}
+                    className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5"
+                  >
+                    <HelpCircle className="w-3 h-3" />
+                    <span>{showGtasksGuide ? 'Hide Guide' : 'OAuth Guide (free 2 min)'}</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={gtasksClientId}
+                  onChange={(e) => setGtasksClientId(e.target.value)}
+                  placeholder="xxxx-xxxx.apps.googleusercontent.com"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
+                />
               </div>
-              <input
-                type="text"
-                value={gtasksClientId}
-                onChange={(e) => setGtasksClientId(e.target.value)}
-                placeholder="xxxx-xxxx.apps.googleusercontent.com"
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
-              />
-            </div>
 
-            {/* Step-by-step accordion guide */}
-            {showGtasksGuide && (
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 text-[10px] space-y-1.5 animate-fadeIn">
-                <p className="font-bold text-slate-700 dark:text-slate-300">
-                  🚀 3 quick steps to create your Google OAuth Client ID:
-                </p>
-                <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-400 leading-normal">
-                  <li>
-                    Go to{' '}
-                    <a
-                      href="https://console.cloud.google.com/apis/credentials"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline font-semibold"
-                    >
-                      Google Cloud Console &rarr; Credentials
-                    </a>.
-                  </li>
-                  <li>Click <strong>+ Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> &rarr; Application type: <strong>Web application</strong>.</li>
-                  <li>Under <strong>Authorized JavaScript origins</strong>, add: <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded">http://localhost:5173</code></li>
-                  <li>Click <strong>Create</strong> and copy your <strong>Client ID</strong> into the box above.</li>
-                  <li>
-                    Make sure the API is enabled: Open{' '}
-                    <a
-                      href="https://console.cloud.google.com/apis/library/tasks.googleapis.com"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline font-semibold"
-                    >
-                      Google Tasks API Library
-                    </a>{' '}
-                    and click <strong>Enable</strong> if not already active.
-                  </li>
-                </ol>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">
+                  Your Google Email (Remembers your account to bypass re-signing in):
+                </label>
+                <input
+                  type="email"
+                  value={gtasksEmail}
+                  onChange={(e) => setGtasksEmail(e.target.value)}
+                  placeholder="e.g. yourname@gmail.com"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 text-xs"
+                />
               </div>
-            )}
+
+              {/* Step-by-step accordion guide */}
+              {showGtasksGuide && (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 text-[10px] space-y-1.5 animate-fadeIn">
+                  <p className="font-bold text-slate-700 dark:text-slate-300">
+                    🚀 Quick steps to create your Google OAuth Client ID:
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-400 leading-normal">
+                    <li>
+                      Go to{' '}
+                      <a
+                        href="https://console.cloud.google.com/apis/credentials"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 dark:text-blue-400 underline font-semibold"
+                      >
+                        Google Cloud Console &rarr; Credentials
+                      </a>.
+                    </li>
+                    <li>Click <strong>+ Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> &rarr; Application type: <strong>Web application</strong>.</li>
+                    <li>Under <strong>Authorized JavaScript origins</strong>, add your Momentum URLs (e.g. <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded">https://ezshap-rgb.github.io</code> and <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded">http://localhost:5173</code>).</li>
+                    <li>Click <strong>Create</strong> and copy your <strong>Client ID</strong> above.</li>
+                    <li>
+                      Ensure the Tasks API is active at{' '}
+                      <a
+                        href="https://console.cloud.google.com/apis/library/tasks.googleapis.com"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 dark:text-blue-400 underline font-semibold"
+                      >
+                        Google Tasks API Library
+                      </a>.
+                    </li>
+                  </ol>
+                </div>
+              )}
+
+              {/* Option B: Permanent Zero-Login Webhook Relay */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <span>Option B: Permanent Zero-Login Webhook URL (Recommended):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowWebhookGuide(!showWebhookGuide)}
+                    className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-medium"
+                  >
+                    <HelpCircle className="w-3 h-3" />
+                    <span>{showWebhookGuide ? 'Hide Webhook Guide' : 'How it works (Zero Popups Forever)'}</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={gtasksWebhookUrl}
+                  onChange={(e) => setGtasksWebhookUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-emerald-300 dark:border-emerald-800 rounded-lg px-3 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
+                />
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  Runs directly inside your Google Account via Google Apps Script. <strong>Never asks to sign in again</strong>.
+                </span>
+
+                {showWebhookGuide && (
+                  <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-[10px] space-y-2 mt-2 animate-fadeIn text-slate-700 dark:text-slate-300">
+                    <p className="font-bold text-emerald-800 dark:text-emerald-300">
+                      ⚡ 1-Minute Zero-Login Setup (No Popups / No Expiring Tokens):
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300 leading-normal">
+                      <li>
+                        Open{' '}
+                        <a
+                          href="https://script.google.com/home/start"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-emerald-700 dark:text-emerald-400 underline font-semibold"
+                        >
+                          script.google.com
+                        </a>{' '}
+                        and click <strong>New project</strong>.
+                      </li>
+                      <li>
+                        Click the button below to copy the 15-line script, and paste it into the editor (replacing all text):
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const code = `function doGet(e) {
+  try {
+    var tasks = Tasks.Tasks.list('@default', { showCompleted: false, showHidden: false, maxResults: 100 }).items || [];
+    return ContentService.createTextOutput(JSON.stringify({ success: true, tasks: tasks })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    if (data.action === 'complete') {
+      Tasks.Tasks.patch({ status: 'completed' }, '@default', data.taskId);
+    } else if (data.action === 'delete') {
+      Tasks.Tasks.remove('@default', data.taskId);
+    } else if (data.action === 'create') {
+      var newTask = Tasks.Tasks.insert({ title: data.title, notes: data.notes || '' }, '@default');
+      return ContentService.createTextOutput(JSON.stringify({ success: true, task: newTask })).setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+                              navigator.clipboard.writeText(code);
+                              setCopiedWebhookScript(true);
+                              setTimeout(() => setCopiedWebhookScript(false), 2000);
+                            }}
+                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1 shadow-xs"
+                          >
+                            {copiedWebhookScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedWebhookScript ? '✓ Copied Script!' : 'Copy Webhook Script'}</span>
+                          </button>
+                        </div>
+                      </li>
+                      <li>On the left side, click <strong>+</strong> next to <strong>Services</strong> &rarr; select <strong>Google Tasks API</strong> &rarr; click <strong>Add</strong>.</li>
+                      <li>Click <strong>Deploy</strong> (top-right) &rarr; <strong>New deployment</strong> &rarr; select type <strong>Web app</strong>.</li>
+                      <li>Set <strong>Execute as: Me</strong> and <strong>Who has access: Anyone</strong> &rarr; click <strong>Deploy</strong>.</li>
+                      <li>Copy the <strong>Web app URL</strong> and paste it into the box above!</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Connection Actions */}
             <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
