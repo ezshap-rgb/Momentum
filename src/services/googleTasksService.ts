@@ -124,7 +124,7 @@ export async function requestGoogleTasksAuth(
     try {
       const tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId.trim(),
-        scope: 'https://www.googleapis.com/auth/tasks email',
+        scope: 'https://www.googleapis.com/auth/tasks',
         hint: emailHint || undefined,
         callback: async (response: GoogleTokenResponse) => {
           clearTimeout(timeoutId);
@@ -134,20 +134,9 @@ export async function requestGoogleTasksAuth(
           }
           if (response.access_token) {
             saveStoredAccessToken(response.access_token, response.expires_in || 3600);
-
-            // Fetch user email in background so subsequent refreshes skip the account picker
-            try {
-              const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                headers: { Authorization: `Bearer ${response.access_token}` },
-              });
-              if (uRes.ok) {
-                const uData = await uRes.json();
-                if (uData.email) {
-                  saveStoredUserEmail(uData.email);
-                }
-              }
-            } catch {}
-
+            if (emailHint) {
+              saveStoredUserEmail(emailHint);
+            }
             resolve(response.access_token);
           } else {
             reject(new Error('No access token returned by Google.'));

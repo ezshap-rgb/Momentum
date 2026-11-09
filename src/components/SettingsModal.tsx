@@ -268,7 +268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Option A: Google OAuth 2.0 Client ID:
+                    Google OAuth 2.0 Web Client ID:
                   </label>
                   <button
                     type="button"
@@ -337,100 +337,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </div>
               )}
 
-              {/* Option B: Permanent Zero-Login Webhook Relay */}
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <span>Option B: Permanent Zero-Login Webhook URL (Recommended):</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowWebhookGuide(!showWebhookGuide)}
-                    className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-medium"
-                  >
-                    <HelpCircle className="w-3 h-3" />
-                    <span>{showWebhookGuide ? 'Hide Webhook Guide' : 'How it works (Zero Popups Forever)'}</span>
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={gtasksWebhookUrl}
-                  onChange={(e) => setGtasksWebhookUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-emerald-300 dark:border-emerald-800 rounded-lg px-3 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
-                />
-                <span className="text-[10px] text-slate-400 block mt-0.5">
-                  Runs directly inside your Google Account via Google Apps Script. <strong>Never asks to sign in again</strong>.
-                </span>
 
-                {showWebhookGuide && (
-                  <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-[10px] space-y-2 mt-2 animate-fadeIn text-slate-700 dark:text-slate-300">
-                    <p className="font-bold text-emerald-800 dark:text-emerald-300">
-                      ⚡ 1-Minute Zero-Login Setup (No Popups / No Expiring Tokens):
-                    </p>
-                    <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-300 leading-normal">
-                      <li>
-                        Open{' '}
-                        <a
-                          href="https://script.google.com/home/start"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-emerald-700 dark:text-emerald-400 underline font-semibold"
-                        >
-                          script.google.com
-                        </a>{' '}
-                        and click <strong>New project</strong>.
-                      </li>
-                      <li>
-                        Click the button below to copy the 15-line script, and paste it into the editor (replacing all text):
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const code = `function doGet(e) {
-  try {
-    var tasks = Tasks.Tasks.list('@default', { showCompleted: false, showHidden: false, maxResults: 100 }).items || [];
-    return ContentService.createTextOutput(JSON.stringify({ success: true, tasks: tasks })).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    if (data.action === 'complete') {
-      Tasks.Tasks.patch({ status: 'completed' }, '@default', data.taskId);
-    } else if (data.action === 'delete') {
-      Tasks.Tasks.remove('@default', data.taskId);
-    } else if (data.action === 'create') {
-      var newTask = Tasks.Tasks.insert({ title: data.title, notes: data.notes || '' }, '@default');
-      return ContentService.createTextOutput(JSON.stringify({ success: true, task: newTask })).setMimeType(ContentService.MimeType.JSON);
-    }
-    return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-                              navigator.clipboard.writeText(code);
-                              setCopiedWebhookScript(true);
-                              setTimeout(() => setCopiedWebhookScript(false), 2000);
-                            }}
-                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1 shadow-xs"
-                          >
-                            {copiedWebhookScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                            <span>{copiedWebhookScript ? '✓ Copied Script!' : 'Copy Webhook Script'}</span>
-                          </button>
-                        </div>
-                      </li>
-                      <li>On the left side, click <strong>+</strong> next to <strong>Services</strong> &rarr; select <strong>Google Tasks API</strong> &rarr; click <strong>Add</strong>.</li>
-                      <li>Click <strong>Deploy</strong> (top-right) &rarr; <strong>New deployment</strong> &rarr; select type <strong>Web app</strong>.</li>
-                      <li>Set <strong>Execute as: Me</strong> and <strong>Who has access: Anyone</strong> &rarr; click <strong>Deploy</strong>.</li>
-                      <li>Copy the <strong>Web app URL</strong> and paste it into the box above!</li>
-                    </ol>
-                  </div>
-                )}
-              </div>
-            </div>
+
+                </div>
 
             {/* Connection Actions */}
             <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
