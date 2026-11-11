@@ -27,9 +27,13 @@ The user has ADD and dumps unstructured voice notes or quick thoughts across mul
 Your goal is to parse their brain dump into 4 fundamental buckets without cognitive overhead:
 
 1. "quick_jobs": Independent, bite-sized tasks completed in one sitting (e.g., "Call electrician", "Order parts").
+   - Explicit trigger keywords: "Task: ...", "Job: ...", "[1m]", "[5m]", "[15m]".
 2. "responsibilities": Multi-step obligations with an end state. Identify the overarching responsibility and extract the single immediate "next_action" step.
+   - Explicit trigger keywords: "Resp: ...", "Responsibility: ...", "Bigger: ...".
 3. "project_updates": Ongoing creative or long-term projects. Check if the thought matches or updates an existing project (${existingProjectNames || 'None specified yet'}) or creates/updates a project. Extract project_name, the concise update_note ("where I am"), and the immediate new_next_step.
+   - Explicit trigger keyword: "Project: ...".
 4. "habits": Habits or daily rhythms (e.g. Bedtime, workout/stretching, water, reading, push-ups). Record true/false or numeric value (e.g. minutes or reps).
+   - Explicit trigger keyword: "Habit: ...".
 
 Current Date Context: ${new Date().toISOString().split('T')[0]}
 

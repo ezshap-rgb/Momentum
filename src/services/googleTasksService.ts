@@ -307,6 +307,15 @@ export async function ensureGoogleTaskLists(accessToken: string): Promise<Dedica
   };
 }
 
+export interface TaskToRelocate {
+  sourceListId: string;
+  targetListId: string;
+  task: GoogleTaskItem;
+  momentumType: 'quick' | 'resp' | 'proj' | 'habit';
+  title: string;
+  notes?: string;
+}
+
 export interface SyncTasksResult {
   addedQuickJobs: number;
   addedResponsibilities: number;
@@ -315,6 +324,7 @@ export interface SyncTasksResult {
   removedTasks: number;
   totalSynced: number;
   updatedBoard: MomentumBoardData;
+  tasksToRelocate?: TaskToRelocate[];
 }
 
 /**
@@ -350,13 +360,15 @@ export function syncTasksIntoBoard(
   boardData: MomentumBoardData,
   taskLists: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[],
   cleanOrphanedDemoTasks = false,
-  newlyCreatedTaskIds?: Set<string>
+  newlyCreatedTaskIds?: Set<string>,
+  dedicatedLists?: DedicatedTaskLists
 ): SyncTasksResult {
   let addedQuickJobs = 0;
   let addedResponsibilities = 0;
   let addedProjects = 0;
   let addedHabits = 0;
   let removedTasks = 0;
+  const tasksToRelocate: TaskToRelocate[] = [];
 
   // 1. Build map of all active Google Tasks
   const activeGoogleTasks = new Map<string, { listId: string; listTitle?: string; task: GoogleTaskItem }>();
@@ -543,14 +555,36 @@ export function syncTasksIntoBoard(
       const noteSteps = parseStepsFromNotes(task.notes);
 
       const projMatch = rawTitle.match(/^project:\s*(.+)$/i);
-      const respMatch = rawTitle.match(/^(?:resp|responsibility):\s*(.+)$/i);
+      const respMatch = rawTitle.match(/^(?:resp|responsibility|bigger):\s*(.+)$/i);
       const habitMatch = rawTitle.match(/^habit:\s*(.+)$/i);
+      const jobMatch = rawTitle.match(/^(?:job|task):\s*(.+)$/i);
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
 
-      // 1. QUICK JOBS (Explicitly Tagged [1m], [5m], [15m])
-      if (quickMatch) {
-        const duration = quickMatch[1].toLowerCase() as QuickJobDuration;
-        const cleanTitle = quickMatch[2].trim();
+      // 1. QUICK JOBS (Explicitly Tagged "Job: ...", "Task: ...", or [1m], [5m], [15m])
+      if (jobMatch || quickMatch) {
+        let cleanTitle = jobMatch ? jobMatch[1].trim() : (quickMatch ? quickMatch[2].trim() : rawTitle);
+        let duration: QuickJobDuration = '5m';
+
+        // Check if duration was specified like [1m], [5m], [15m] inside the job text
+        const innerDurMatch = cleanTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
+        if (innerDurMatch) {
+          duration = innerDurMatch[1].toLowerCase() as QuickJobDuration;
+          cleanTitle = innerDurMatch[2].trim();
+        } else if (quickMatch) {
+          duration = quickMatch[1].toLowerCase() as QuickJobDuration;
+        }
+
+        // Relocate if sitting in main list or another list
+        if (dedicatedLists?.quickJobsListId && listId !== dedicatedLists.quickJobsListId) {
+          tasksToRelocate.push({
+            sourceListId: listId,
+            targetListId: dedicatedLists.quickJobsListId,
+            task,
+            momentumType: 'quick',
+            title: `[${duration}] ${cleanTitle}`,
+            notes: task.notes,
+          });
+        }
 
         const existing = quickJobs.find(
           (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanTitle.toLowerCase()
@@ -576,7 +610,7 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ..." OR located in a Responsibilities list)
+      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ...", "Responsibility: ...", "Bigger: ..." OR located in a Responsibilities list)
       if (respMatch || (isRespList && !projMatch && !habitMatch)) {
         const fullContent = respMatch ? respMatch[1].trim() : rawTitle;
         let respTitle = fullContent;
@@ -586,6 +620,18 @@ export function syncTasksIntoBoard(
           const parts = fullContent.split('->');
           respTitle = parts[0].trim();
           nextStep = parts.slice(1).join('->').trim();
+        }
+
+        // Relocate if sitting in main list or another list
+        if (dedicatedLists?.responsibilitiesListId && listId !== dedicatedLists.responsibilitiesListId) {
+          tasksToRelocate.push({
+            sourceListId: listId,
+            targetListId: dedicatedLists.responsibilitiesListId,
+            task,
+            momentumType: 'resp',
+            title: `Resp: ${respTitle}${nextStep ? ` -> ${nextStep}` : ''}`,
+            notes: task.notes,
+          });
         }
 
         // Incorporate multi-step breakdown from task notes
@@ -633,6 +679,19 @@ export function syncTasksIntoBoard(
       // 3. HABITS (Tagged "Habit: ..." OR located in a Habits list)
       if (habitMatch || (isHabitList && !projMatch && !respMatch)) {
         const habitName = habitMatch ? habitMatch[1].trim() : rawTitle;
+
+        // Relocate if sitting in main list or another list
+        if (dedicatedLists?.habitsListId && listId !== dedicatedLists.habitsListId) {
+          tasksToRelocate.push({
+            sourceListId: listId,
+            targetListId: dedicatedLists.habitsListId,
+            task,
+            momentumType: 'habit',
+            title: `Habit: ${habitName}`,
+            notes: task.notes,
+          });
+        }
+
         const key = taskId || habitName.toLowerCase();
         if (!existingHabitKeys.has(key)) {
           habits.push({
@@ -672,6 +731,18 @@ export function syncTasksIntoBoard(
           } else {
             nextStep = nextPart;
           }
+        }
+
+        // Relocate if sitting in main list or another list
+        if (dedicatedLists?.projectsListId && listId !== dedicatedLists.projectsListId) {
+          tasksToRelocate.push({
+            sourceListId: listId,
+            targetListId: dedicatedLists.projectsListId,
+            task,
+            momentumType: 'proj',
+            title: `Project: ${projName}${nextStep ? ` | Next: ${nextStep}` : ''}`,
+            notes: task.notes,
+          });
         }
 
         // Parse multi-step items from notes
@@ -733,6 +804,18 @@ export function syncTasksIntoBoard(
 
       // 5. UNTAGGED REGULAR TASK: Route to Quick Jobs (5m default) so ADHD user never loses a task
       const cleanGenericTitle = rawTitle;
+
+      if (dedicatedLists?.quickJobsListId && listId !== dedicatedLists.quickJobsListId) {
+        tasksToRelocate.push({
+          sourceListId: listId,
+          targetListId: dedicatedLists.quickJobsListId,
+          task,
+          momentumType: 'quick',
+          title: `[5m] ${cleanGenericTitle}`,
+          notes: task.notes,
+        });
+      }
+
       const existing = quickJobs.find(
         (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase()
       );
@@ -773,6 +856,7 @@ export function syncTasksIntoBoard(
       projects,
       habits,
     },
+    tasksToRelocate: tasksToRelocate.length > 0 ? tasksToRelocate : undefined,
   };
 }
 

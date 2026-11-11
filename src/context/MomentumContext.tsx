@@ -1009,12 +1009,57 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         let totalAdded = 0;
         let totalRemoved = 0;
 
-        updateBoard(() => {
-          const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks, newlyCreatedTaskIds);
-          totalAdded = result.totalSynced;
-          totalRemoved = result.removedTasks;
-          return result.updatedBoard;
-        });
+        const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks, newlyCreatedTaskIds, dedicatedLists);
+        totalAdded = result.totalSynced;
+        totalRemoved = result.removedTasks;
+        let finalBoard = result.updatedBoard;
+
+        // Auto-Triage: Relocate tasks sitting in default/main list into their dedicated lists in Google Tasks!
+        if (result.tasksToRelocate && result.tasksToRelocate.length > 0) {
+          for (const item of result.tasksToRelocate) {
+            try {
+              const newId = await createGoogleTask(token, item.targetListId, item.title, item.notes);
+              if (newId) {
+                await deleteGoogleTask(token, item.sourceListId, item.task.id);
+                // Update board item with new googleTaskId and googleTaskListId
+                if (item.momentumType === 'quick') {
+                  finalBoard = {
+                    ...finalBoard,
+                    quick_jobs: finalBoard.quick_jobs.map((j) =>
+                      j.googleTaskId === item.task.id ? { ...j, googleTaskId: newId, googleTaskListId: item.targetListId } : j
+                    ),
+                  };
+                } else if (item.momentumType === 'resp') {
+                  finalBoard = {
+                    ...finalBoard,
+                    responsibilities: finalBoard.responsibilities.map((r) =>
+                      r.googleTaskId === item.task.id ? { ...r, googleTaskId: newId, googleTaskListId: item.targetListId } : r
+                    ),
+                  };
+                } else if (item.momentumType === 'proj') {
+                  finalBoard = {
+                    ...finalBoard,
+                    projects: finalBoard.projects.map((p) =>
+                      p.googleTaskId === item.task.id ? { ...p, googleTaskId: newId, googleTaskListId: item.targetListId } : p
+                    ),
+                  };
+                } else if (item.momentumType === 'habit') {
+                  finalBoard = {
+                    ...finalBoard,
+                    habits: finalBoard.habits.map((h) =>
+                      h.googleTaskId === item.task.id ? { ...h, googleTaskId: newId, googleTaskListId: item.targetListId } : h
+                    ),
+                  };
+                }
+              }
+            } catch (relocateErr) {
+              console.warn('Failed to relocate task across Google Task lists:', relocateErr);
+            }
+          }
+          saveLocalBoardData(finalBoard);
+        }
+
+        updateBoard(() => finalBoard);
 
         if (totalAdded > 0 || totalRemoved > 0 || totalPushed > 0) {
           soundService.playSuccessChime();
