@@ -32,6 +32,7 @@ import {
   requestGoogleTasksAuth,
   fetchAllGoogleTasks,
   fetchGoogleAccountEmail,
+  ensureGoogleTaskLists,
   syncTasksIntoBoard,
   pushLocalTasksToGoogle,
   clearStoredAccessToken,
@@ -245,18 +246,19 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } else {
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
-          createGoogleTask(token, '@default', `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+          const listId = settings.googleTaskListsMap?.quickJobsListId || '@default';
+          createGoogleTask(token, listId, `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
             if (taskId) {
               updateBoard((prev) => ({
                 ...prev,
-                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
+                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId, googleTaskListId: listId } : j)),
               }));
             }
           });
         }
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl]
+    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap]
   );
 
   const toggleQuickJob = useCallback(
@@ -332,8 +334,25 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         responsibilities: [newResp, ...prev.responsibilities],
       }));
+
+      // Background push to Google Tasks
+      const token = getStoredAccessToken();
+      if (token && settings.googleTasksConnected) {
+        const listId = settings.googleTaskListsMap?.responsibilitiesListId || '@default';
+        const taskTitle = `Resp: ${newResp.title} -> ${newResp.steps[0]}`;
+        createGoogleTask(token, listId, taskTitle).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              responsibilities: prev.responsibilities.map((r) =>
+                r.id === newResp.id ? { ...r, googleTaskId: taskId, googleTaskListId: listId } : r
+              ),
+            }));
+          }
+        });
+      }
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
   );
 
   const advanceResponsibilityStep = useCallback(
@@ -477,8 +496,25 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         projects: [newProj, ...prev.projects],
       }));
+
+      // Background push to Google Tasks
+      const token = getStoredAccessToken();
+      if (token && settings.googleTasksConnected) {
+        const listId = settings.googleTaskListsMap?.projectsListId || '@default';
+        const taskTitle = `Project: ${newProj.name} | Next: ${newProj.next_step}`;
+        createGoogleTask(token, listId, taskTitle).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              projects: prev.projects.map((p) =>
+                p.id === newProj.id ? { ...p, googleTaskId: taskId, googleTaskListId: listId } : p
+              ),
+            }));
+          }
+        });
+      }
     },
-    [updateBoard]
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
   );
 
   const updateProjectProgress = useCallback(
@@ -924,24 +960,32 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksConnected: true,
         });
 
-        // 1. Fetch user's task lists first so we know the primary list ID!
+        // 1. Ensure the 4 dedicated lists exist in user's Google Tasks account (Quick Jobs, Responsibilities, Projects, Habits)
+        let dedicatedLists = settings.googleTaskListsMap;
+        try {
+          dedicatedLists = await ensureGoogleTaskLists(token);
+        } catch (e) {
+          console.warn('Could not auto-create dedicated Google Task lists, using default list:', e);
+        }
+
+        // 2. Fetch user's task lists and detected email
         const [taskLists, detectedEmail] = await Promise.all([
           fetchAllGoogleTasks(token),
           fetchGoogleAccountEmail(token),
         ]);
         const primaryListId = taskLists[0]?.listId || '@default';
 
-        // 2. Read latest board data directly from storage (bypasses any stale closure)
+        // 3. Read latest board data directly from storage (bypasses any stale closure)
         const currentBoard = loadLocalBoardData();
 
         const newlyCreatedTaskIds = new Set<string>();
 
-        // 3. PUSH PHASE: Upload any un-synced local tasks directly into primaryListId
+        // 4. PUSH PHASE: Upload any un-synced local tasks directly into their dedicated lists
         let totalPushed = 0;
         let pushErrors: string[] = [];
         let boardAfterPush = currentBoard;
         try {
-          const pushRes = await pushLocalTasksToGoogle(token, currentBoard, primaryListId);
+          const pushRes = await pushLocalTasksToGoogle(token, currentBoard, dedicatedLists || primaryListId);
           pushErrors = pushRes.errors || [];
           if (pushRes.pushedCount > 0) {
             totalPushed = pushRes.pushedCount;
@@ -953,7 +997,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           pushErrors.push(pushErr?.message || String(pushErr));
         }
 
-        // 4. If we pushed tasks, re-fetch active tasks from Google so reconciliation gets the exact latest state
+        // 5. If we pushed tasks, re-fetch active tasks from Google so reconciliation gets the exact latest state
         let activeTaskLists = taskLists;
         if (totalPushed > 0) {
           try {
@@ -983,6 +1027,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTasksLastSync: Date.now(),
           googleTasksAccountEmail: effectiveEmail,
           googleTasksSyncedLists: activeTaskLists.map((l) => `${l.listTitle}: ${l.tasks.length} active`),
+          googleTaskListsMap: dedicatedLists,
         });
 
         return {

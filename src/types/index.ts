@@ -96,6 +96,13 @@ export interface FirebaseConfigSettings {
   appId: string;
 }
 
+export interface DedicatedTaskLists {
+  quickJobsListId: string;
+  responsibilitiesListId: string;
+  projectsListId: string;
+  habitsListId: string;
+}
+
 export interface AppSettings {
   theme: 'dark' | 'light';
   geminiApiKey: string;
@@ -105,6 +112,7 @@ export interface AppSettings {
   googleTasksEmail?: string;       // Optional user Google email for seamless GIS re-auth
   googleTasksAccountEmail?: string;// Detected authenticated Google Account email
   googleTasksSyncedLists?: string[];// Summary of synced task lists
+  googleTaskListsMap?: DedicatedTaskLists; // Dedicated 4-list IDs for Quick Jobs, Responsibilities, Projects, Habits
   googleTasksWebhookUrl?: string;  // Optional Google Apps Script webhook for permanent 0-login sync
   googleTasksConnected?: boolean;
   googleTasksAutoSync?: boolean;

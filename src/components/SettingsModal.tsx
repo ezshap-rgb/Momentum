@@ -581,7 +581,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             </div>
 
             <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-              Momentum v2.2 • Build 2026-11-10 01:45 AM • Grace-Period Protected Two-Way Sync
+              Momentum v2.3 • Build 2026-11-11 12:30 PM • 4-List Dedicated Sync (Quick Jobs, Responsibilities, Projects, Habits)
             </div>
           </div>
         </form>

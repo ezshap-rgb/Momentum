@@ -1,4 +1,4 @@
-const CACHE_NAME = 'momentum-cache-v7';
+const CACHE_NAME = 'momentum-cache-v8';
 const ASSETS_TO_CACHE = [
   './manifest.json',
   './icons/icon-192.png',

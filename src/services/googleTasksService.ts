@@ -1,4 +1,4 @@
-import { MomentumBoardData, QuickJob, Responsibility, Project, Habit, QuickJobDuration } from '../types';
+import { MomentumBoardData, QuickJob, Responsibility, Project, Habit, QuickJobDuration, DedicatedTaskLists } from '../types';
 import { getDeletedGoogleTaskIds } from './storageService';
 
 declare global {
@@ -238,6 +238,75 @@ export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId
   }
 }
 
+/**
+ * Ensures the 4 dedicated Google Task lists exist:
+ * "Quick Jobs", "Responsibilities", "Projects", "Habits".
+ * If any do not exist, creates them so the user has separate lists in their Google Tasks app/widget.
+ */
+export async function ensureGoogleTaskLists(accessToken: string): Promise<DedicatedTaskLists> {
+  const listsRes = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!listsRes.ok) {
+    throw new Error(`Failed to load Google Task lists (${listsRes.status})`);
+  }
+
+  const data = await listsRes.json();
+  const existingLists: GoogleTaskList[] = data.items || [];
+  const defaultList = existingLists[0] || { id: '@default', title: 'My Tasks' };
+
+  // Match existing lists case-insensitively
+  let quickJobs = existingLists.find((l) => /quick/i.test(l.title));
+  let responsibilities = existingLists.find((l) => /resp|bigger/i.test(l.title));
+  let projects = existingLists.find((l) => /project/i.test(l.title));
+  let habits = existingLists.find((l) => /habit/i.test(l.title));
+
+  const createList = async (title: string): Promise<GoogleTaskList> => {
+    try {
+      const res = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return defaultList;
+  };
+
+  if (!quickJobs) {
+    if (/quick/i.test(defaultList.title)) {
+      quickJobs = defaultList;
+    } else {
+      quickJobs = await createList('Quick Jobs');
+    }
+  }
+
+  if (!responsibilities) {
+    responsibilities = await createList('Responsibilities');
+  }
+
+  if (!projects) {
+    projects = await createList('Projects');
+  }
+
+  if (!habits) {
+    habits = await createList('Habits');
+  }
+
+  return {
+    quickJobsListId: quickJobs.id || defaultList.id,
+    responsibilitiesListId: responsibilities.id || defaultList.id,
+    projectsListId: projects.id || defaultList.id,
+    habitsListId: habits.id || defaultList.id,
+  };
+}
+
 export interface SyncTasksResult {
   addedQuickJobs: number;
   addedResponsibilities: number;
@@ -456,7 +525,12 @@ export function syncTasksIntoBoard(
   const existingProjKeys = new Set(projects.map((p) => p.googleTaskId || p.name.toLowerCase().trim()));
   const existingHabitKeys = new Set(habits.map((h) => h.googleTaskId || h.name.toLowerCase().trim()));
 
-  for (const { listId, tasks } of taskLists) {
+  for (const { listId, listTitle, tasks } of taskLists) {
+    const listName = listTitle || '';
+    const isProjectList = /project/i.test(listName);
+    const isRespList = /resp|bigger/i.test(listName);
+    const isHabitList = /habit/i.test(listName);
+
     for (const task of tasks) {
       const rawTitle = (task.title || '').trim();
       if (!rawTitle) continue;
@@ -468,8 +542,12 @@ export function syncTasksIntoBoard(
 
       const noteSteps = parseStepsFromNotes(task.notes);
 
-      // 1. QUICK JOBS (Tagged [1m], [5m], [15m])
+      const projMatch = rawTitle.match(/^project:\s*(.+)$/i);
+      const respMatch = rawTitle.match(/^(?:resp|responsibility):\s*(.+)$/i);
+      const habitMatch = rawTitle.match(/^habit:\s*(.+)$/i);
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
+
+      // 1. QUICK JOBS (Explicitly Tagged [1m], [5m], [15m])
       if (quickMatch) {
         const duration = quickMatch[1].toLowerCase() as QuickJobDuration;
         const cleanTitle = quickMatch[2].trim();
@@ -498,10 +576,9 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ..." or "Responsibility: ...")
-      const respMatch = rawTitle.match(/^(?:resp|responsibility):\s*(.+)$/i);
-      if (respMatch) {
-        const fullContent = respMatch[1].trim();
+      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ..." OR located in a Responsibilities list)
+      if (respMatch || (isRespList && !projMatch && !habitMatch)) {
+        const fullContent = respMatch ? respMatch[1].trim() : rawTitle;
         let respTitle = fullContent;
         let nextStep = '';
 
@@ -545,6 +622,7 @@ export function syncTasksIntoBoard(
         } else {
           const existing = responsibilities.find((r) => r.googleTaskId === taskId || r.title.toLowerCase().trim() === respTitle.toLowerCase());
           if (existing) {
+            existing.googleTaskId = taskId;
             existing.googleTaskListId = listId;
             if (task.due) existing.due = task.due.split('T')[0];
           }
@@ -552,10 +630,9 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 3. HABITS (Tagged "Habit: ...")
-      const habitMatch = rawTitle.match(/^habit:\s*(.+)$/i);
-      if (habitMatch) {
-        const habitName = habitMatch[1].trim();
+      // 3. HABITS (Tagged "Habit: ..." OR located in a Habits list)
+      if (habitMatch || (isHabitList && !projMatch && !respMatch)) {
+        const habitName = habitMatch ? habitMatch[1].trim() : rawTitle;
         const key = taskId || habitName.toLowerCase();
         if (!existingHabitKeys.has(key)) {
           habits.push({
@@ -573,16 +650,16 @@ export function syncTasksIntoBoard(
         } else {
           const existing = habits.find((h) => h.googleTaskId === taskId || h.name.toLowerCase().trim() === habitName.toLowerCase());
           if (existing) {
+            existing.googleTaskId = taskId;
             existing.googleTaskListId = listId;
           }
         }
         continue;
       }
 
-      // 4. PROJECTS (Tagged "Project: ...")
-      const projMatch = rawTitle.match(/^project:\s*(.+)$/i);
-      if (projMatch) {
-        const fullContent = projMatch[1].trim();
+      // 4. PROJECTS (Tagged "Project: ..." OR located in a Projects list)
+      if (projMatch || (isProjectList && !respMatch && !habitMatch)) {
+        const fullContent = projMatch ? projMatch[1].trim() : rawTitle;
         let projName = fullContent;
         let nextStep = '';
 
@@ -647,6 +724,7 @@ export function syncTasksIntoBoard(
         } else {
           const existing = projects.find((p) => p.googleTaskId === taskId || p.name.toLowerCase().trim() === projName.toLowerCase());
           if (existing) {
+            existing.googleTaskId = taskId;
             existing.googleTaskListId = listId;
           }
         }
@@ -859,7 +937,7 @@ export async function createGoogleTask(
 export async function pushLocalTasksToGoogle(
   accessToken: string,
   boardData: MomentumBoardData,
-  defaultListId = '@default'
+  targetLists?: DedicatedTaskLists | string
 ): Promise<{
   updatedBoard: MomentumBoardData;
   pushedCount: number;
@@ -874,19 +952,29 @@ export async function pushLocalTasksToGoogle(
   const updatedProjects = [...boardData.projects];
   const updatedHabits = [...boardData.habits];
 
-  // 1. Quick Jobs
+  const listConfig: DedicatedTaskLists =
+    typeof targetLists === 'object' && targetLists !== null
+      ? targetLists
+      : {
+          quickJobsListId: typeof targetLists === 'string' && targetLists ? targetLists : '@default',
+          responsibilitiesListId: typeof targetLists === 'string' && targetLists ? targetLists : '@default',
+          projectsListId: typeof targetLists === 'string' && targetLists ? targetLists : '@default',
+          habitsListId: typeof targetLists === 'string' && targetLists ? targetLists : '@default',
+        };
+
+  // 1. Quick Jobs -> quickJobsListId
   for (let i = 0; i < updatedQuickJobs.length; i++) {
     const job = updatedQuickJobs[i];
     if (!job.googleTaskId && !job.done) {
       if (job.id === 'qj-1' || job.id === 'qj-2') continue;
       try {
         const title = `[${job.duration || '5m'}] ${job.title}`;
-        const taskId = await createGoogleTask(accessToken, defaultListId, title);
+        const taskId = await createGoogleTask(accessToken, listConfig.quickJobsListId, title);
         if (taskId) {
           updatedQuickJobs[i] = {
             ...job,
             googleTaskId: taskId,
-            googleTaskListId: defaultListId,
+            googleTaskListId: listConfig.quickJobsListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
@@ -897,7 +985,7 @@ export async function pushLocalTasksToGoogle(
     }
   }
 
-  // 2. Responsibilities
+  // 2. Responsibilities -> responsibilitiesListId
   for (let i = 0; i < updatedResponsibilities.length; i++) {
     const resp = updatedResponsibilities[i];
     if (!resp.googleTaskId && resp.status === 'active') {
@@ -910,12 +998,12 @@ export async function pushLocalTasksToGoogle(
           ? remainingSteps.map((s, idx) => `Step ${idx + 2}: ${s}`).join('\n')
           : undefined;
 
-        const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
+        const taskId = await createGoogleTask(accessToken, listConfig.responsibilitiesListId, title, notes);
         if (taskId) {
           updatedResponsibilities[i] = {
             ...resp,
             googleTaskId: taskId,
-            googleTaskListId: defaultListId,
+            googleTaskListId: listConfig.responsibilitiesListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
@@ -926,7 +1014,7 @@ export async function pushLocalTasksToGoogle(
     }
   }
 
-  // 3. Projects
+  // 3. Projects -> projectsListId
   for (let i = 0; i < updatedProjects.length; i++) {
     const proj = updatedProjects[i];
     if (!proj.googleTaskId && proj.status !== 'completed' && proj.status !== 'parked') {
@@ -943,12 +1031,12 @@ export async function pushLocalTasksToGoogle(
         }
         const notes = notesLines.join('\n');
 
-        const taskId = await createGoogleTask(accessToken, defaultListId, title, notes);
+        const taskId = await createGoogleTask(accessToken, listConfig.projectsListId, title, notes);
         if (taskId) {
           updatedProjects[i] = {
             ...proj,
             googleTaskId: taskId,
-            googleTaskListId: defaultListId,
+            googleTaskListId: listConfig.projectsListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
@@ -959,19 +1047,19 @@ export async function pushLocalTasksToGoogle(
     }
   }
 
-  // 4. Habits
+  // 4. Habits -> habitsListId
   for (let i = 0; i < updatedHabits.length; i++) {
     const habit = updatedHabits[i];
     if (!habit.googleTaskId) {
       if (habit.id === 'hab-1' || habit.id === 'hab-2') continue;
       try {
         const title = `Habit: ${habit.name}`;
-        const taskId = await createGoogleTask(accessToken, defaultListId, title);
+        const taskId = await createGoogleTask(accessToken, listConfig.habitsListId, title);
         if (taskId) {
           updatedHabits[i] = {
             ...habit,
             googleTaskId: taskId,
-            googleTaskListId: defaultListId,
+            googleTaskListId: listConfig.habitsListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
