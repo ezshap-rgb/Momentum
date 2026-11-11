@@ -69,17 +69,17 @@ Guilt-free routines tracked with next upcoming responsibility timing:
   }
   ```
 
-## Google Tasks Voice/Mobile Ingestion Format
-When creating tasks in Google Tasks via voice or Gemini:
-- **Quick Jobs**: `[5m] Task name` (or `[1m]`, `[15m]`)
-- **Responsibilities**:
-  - Title: `Resp: Project/Area -> Step 1 action`
+## Google Tasks & Gemini Voice/Chat Ingestion Keywords
+When creating tasks in Google Tasks via voice, Gemini, or chat:
+- **Task** (Quick Task): `Task: Task name` or `Task: [5m] Task name` (or `[1m]`, `[5m]`, `[15m]`, or untagged default)
+- **Job / Bigger Job** (Bigger Responsibility):
+  - Title: `Job: Title -> Step 1 action` or `Bigger Job: Title -> Step 1 action` (or `Resp: ...`)
   - Notes:
     ```
     Step 2: Subsequent action
     Step 3: Following action
     ```
-- **Projects**:
+- **Project**:
   - Title: `Project: Project Name | Next: Immediate first physical action`
   - Notes:
     ```
@@ -87,6 +87,8 @@ When creating tasks in Google Tasks via voice or Gemini:
     Step 2: Second planned action
     Step 3: Third planned action
     ```
+- **Habit**:
+  - Title: `Habit: Habit Name`
 
 ## How to Apply User Requests
 When the user gives natural language input (e.g. "Add a 5m job to call Sam", "Mark morning push-ups done", "Update Sphere It: printed ring, next step test fit"):

@@ -555,14 +555,14 @@ export function syncTasksIntoBoard(
       const noteSteps = parseStepsFromNotes(task.notes);
 
       const projMatch = rawTitle.match(/^project:\s*(.+)$/i);
-      const respMatch = rawTitle.match(/^(?:resp|responsibility|bigger):\s*(.+)$/i);
+      const respMatch = rawTitle.match(/^(?:job|bigger\s*job|resp|responsibility|bigger):\s*(.+)$/i);
       const habitMatch = rawTitle.match(/^habit:\s*(.+)$/i);
-      const jobMatch = rawTitle.match(/^(?:job|task):\s*(.+)$/i);
+      const taskMatch = rawTitle.match(/^task:\s*(.+)$/i);
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
 
-      // 1. QUICK JOBS (Explicitly Tagged "Job: ...", "Task: ...", or [1m], [5m], [15m])
-      if (jobMatch || quickMatch) {
-        let cleanTitle = jobMatch ? jobMatch[1].trim() : (quickMatch ? quickMatch[2].trim() : rawTitle);
+      // 1. QUICK TASKS (Explicitly Tagged "Task: ...", or [1m], [5m], [15m])
+      if (taskMatch || quickMatch) {
+        let cleanTitle = taskMatch ? taskMatch[1].trim() : (quickMatch ? quickMatch[2].trim() : rawTitle);
         let duration: QuickJobDuration = '5m';
 
         // Check if duration was specified like [1m], [5m], [15m] inside the job text
@@ -581,7 +581,7 @@ export function syncTasksIntoBoard(
             targetListId: dedicatedLists.quickJobsListId,
             task,
             momentumType: 'quick',
-            title: `[${duration}] ${cleanTitle}`,
+            title: `Task: [${duration}] ${cleanTitle}`,
             notes: task.notes,
           });
         }
@@ -629,7 +629,7 @@ export function syncTasksIntoBoard(
             targetListId: dedicatedLists.responsibilitiesListId,
             task,
             momentumType: 'resp',
-            title: `Resp: ${respTitle}${nextStep ? ` -> ${nextStep}` : ''}`,
+            title: `Job: ${respTitle}${nextStep ? ` -> ${nextStep}` : ''}`,
             notes: task.notes,
           });
         }
@@ -1052,7 +1052,7 @@ export async function pushLocalTasksToGoogle(
     if (!job.googleTaskId && !job.done) {
       if (job.id === 'qj-1' || job.id === 'qj-2') continue;
       try {
-        const title = `[${job.duration || '5m'}] ${job.title}`;
+        const title = `Task: [${job.duration || '5m'}] ${job.title}`;
         const taskId = await createGoogleTask(accessToken, listConfig.quickJobsListId, title);
         if (taskId) {
           updatedQuickJobs[i] = {
@@ -1076,7 +1076,7 @@ export async function pushLocalTasksToGoogle(
       if (resp.id === 'resp-1') continue;
       try {
         const currentStep = resp.steps[resp.current_step_index] || resp.steps[0] || 'First step';
-        const title = `Resp: ${resp.title} -> ${currentStep}`;
+        const title = `Job: ${resp.title} -> ${currentStep}`;
         const remainingSteps = resp.steps.slice(resp.current_step_index + 1);
         const notes = remainingSteps.length > 0
           ? remainingSteps.map((s, idx) => `Step ${idx + 2}: ${s}`).join('\n')

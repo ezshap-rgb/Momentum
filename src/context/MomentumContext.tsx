@@ -247,7 +247,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
           const listId = settings.googleTaskListsMap?.quickJobsListId || '@default';
-          createGoogleTask(token, listId, `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+          createGoogleTask(token, listId, `Task: [${jobDuration}] ${cleanTitle}`).then((taskId) => {
             if (taskId) {
               updateBoard((prev) => ({
                 ...prev,
@@ -339,7 +339,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const token = getStoredAccessToken();
       if (token && settings.googleTasksConnected) {
         const listId = settings.googleTaskListsMap?.responsibilitiesListId || '@default';
-        const taskTitle = `Resp: ${newResp.title} -> ${newResp.steps[0]}`;
+        const taskTitle = `Job: ${newResp.title} -> ${newResp.steps[0]}`;
         createGoogleTask(token, listId, taskTitle).then((taskId) => {
           if (taskId) {
             updateBoard((prev) => ({

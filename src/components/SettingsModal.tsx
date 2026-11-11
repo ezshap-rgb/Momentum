@@ -581,7 +581,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             </div>
 
             <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-              Momentum v2.4 • Build 2026-11-11 12:45 PM • Auto-Triage & Relocate across 4 Lists (Task, Job, Project, Habit)
+              Momentum v2.5 • Build 2026-11-11 12:50 PM • Keywords: Task (Quick), Job (Responsibility), Project, Habit
             </div>
           </div>
         </form>
