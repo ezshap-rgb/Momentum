@@ -89,6 +89,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       const parts: string[] = [];
       if (res.pushedCount && res.pushedCount > 0) parts.push(`Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'}`);
       if (res.count > 0) parts.push(`Synced ${res.count} from Google`);
+      if (res.relocatedCount && res.relocatedCount > 0) parts.push(`Relocated ${res.relocatedCount} to dedicated lists`);
       if (res.removedCount && res.removedCount > 0) parts.push(`Removed ${res.removedCount} deleted/completed`);
       const accountStr = res.accountEmail ? ` (${res.accountEmail})` : '';
       setSyncFeedback({
@@ -113,6 +114,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     if (res.success) {
       const parts: string[] = [];
       if (res.count > 0) parts.push(`Synced ${res.count} active task${res.count === 1 ? '' : 's'}`);
+      if (res.relocatedCount && res.relocatedCount > 0) parts.push(`Relocated ${res.relocatedCount} to dedicated lists`);
       if (res.removedCount && res.removedCount > 0) parts.push(`Removed ${res.removedCount} orphaned/deleted task${res.removedCount === 1 ? '' : 's'}`);
       const accountStr = res.accountEmail ? ` (${res.accountEmail})` : '';
       setSyncFeedback({
@@ -581,7 +583,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             </div>
 
             <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-              Momentum v2.5 • Build 2026-11-11 12:50 PM • Keywords: Task (Quick), Job (Responsibility), Project, Habit
+              Momentum v2.5 • Build 2026-11-11 1:15 PM • Dedicated Lists Auto-Relocate
             </div>
           </div>
         </form>

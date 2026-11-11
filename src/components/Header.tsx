@@ -118,14 +118,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
                 const parts: string[] = [];
                 if (res.pushedCount && res.pushedCount > 0) parts.push(`✓ Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'} to Google Tasks`);
                 if (res.count > 0) parts.push(`✓ Synced ${res.count} from Google`);
+                if (res.relocatedCount && res.relocatedCount > 0) parts.push(`✓ Relocated ${res.relocatedCount} to dedicated Google lists`);
                 if (res.removedCount && res.removedCount > 0) parts.push(`✓ Removed ${res.removedCount} deleted/completed`);
                 const accountDetail = res.accountEmail ? `\nConnected Account: ${res.accountEmail}` : '';
                 const listDetail = res.listsSummary ? `\nGoogle Task Lists: ${res.listsSummary}` : '';
-                const errorDetail = res.errors && res.errors.length > 0 ? `\n⚠️ Upload Errors:\n${res.errors.join('\n')}` : '';
+                const errorDetail = res.errors && res.errors.length > 0 ? `\n⚠️ Errors:\n${res.errors.join('\n')}` : '';
 
-                if (res.count === 0 && (!res.removedCount || res.removedCount === 0) && (!res.pushedCount || res.pushedCount === 0)) {
+                if (res.count === 0 && (!res.removedCount || res.removedCount === 0) && (!res.pushedCount || res.pushedCount === 0) && (!res.relocatedCount || res.relocatedCount === 0)) {
                   if (res.errors && res.errors.length > 0) {
-                    alert(`Sync completed with upload errors:\n${accountDetail}${errorDetail}`);
+                    alert(`Sync completed with errors:\n${accountDetail}${errorDetail}`);
                   } else {
                     alert(
                       `Connected to Google Tasks: 0 changes.\n${accountDetail}${listDetail}\n\nYour cockpit is 100% in sync with Google Tasks.`

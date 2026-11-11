@@ -62,6 +62,7 @@ interface MomentumContextType {
     count: number;
     pushedCount?: number;
     removedCount?: number;
+    relocatedCount?: number;
     error?: string;
     errors?: string[];
     accountEmail?: string;
@@ -896,6 +897,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       count: number;
       pushedCount?: number;
       removedCount?: number;
+      relocatedCount?: number;
       error?: string;
       errors?: string[];
       accountEmail?: string;
@@ -1015,12 +1017,18 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         let finalBoard = result.updatedBoard;
 
         // Auto-Triage: Relocate tasks sitting in default/main list into their dedicated lists in Google Tasks!
+        let relocatedCount = 0;
+        const relocationErrors: string[] = [];
+
         if (result.tasksToRelocate && result.tasksToRelocate.length > 0) {
           for (const item of result.tasksToRelocate) {
             try {
               const newId = await createGoogleTask(token, item.targetListId, item.title, item.notes);
               if (newId) {
                 await deleteGoogleTask(token, item.sourceListId, item.task.id);
+                recordDeletedGoogleTaskId(item.task.id);
+                relocatedCount++;
+
                 // Update board item with new googleTaskId and googleTaskListId
                 if (item.momentumType === 'quick') {
                   finalBoard = {
@@ -1052,8 +1060,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   };
                 }
               }
-            } catch (relocateErr) {
-              console.warn('Failed to relocate task across Google Task lists:', relocateErr);
+            } catch (relocateErr: any) {
+              const msg = relocateErr?.message || String(relocateErr);
+              console.error('Failed to relocate task across Google Task lists:', item.title, msg);
+              relocationErrors.push(`Relocate "${item.title}": ${msg}`);
             }
           }
           saveLocalBoardData(finalBoard);
@@ -1061,8 +1071,15 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         updateBoard(() => finalBoard);
 
-        if (totalAdded > 0 || totalRemoved > 0 || totalPushed > 0) {
+        if (totalAdded > 0 || totalRemoved > 0 || totalPushed > 0 || relocatedCount > 0) {
           soundService.playSuccessChime();
+        }
+
+        // If tasks were relocated, refresh task lists so summary and active counts are fresh
+        if (relocatedCount > 0) {
+          try {
+            activeTaskLists = await fetchAllGoogleTasks(token);
+          } catch {}
         }
 
         const effectiveEmail = detectedEmail || settings.googleTasksEmail || '';
@@ -1075,14 +1092,17 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           googleTaskListsMap: dedicatedLists,
         });
 
+        const combinedErrors = [...pushErrors, ...relocationErrors];
+
         return {
           success: true,
           count: totalAdded,
           pushedCount: totalPushed,
           removedCount: totalRemoved,
+          relocatedCount,
           accountEmail: effectiveEmail,
-          listsSummary,
-          errors: pushErrors.length > 0 ? pushErrors : undefined,
+          listsSummary: activeTaskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', '),
+          errors: combinedErrors.length > 0 ? combinedErrors : undefined,
         };
       } catch (err: any) {
         return {

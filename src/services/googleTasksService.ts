@@ -204,8 +204,9 @@ export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId
     const results: { listId: string; listTitle: string; tasks: GoogleTaskItem[] }[] = [];
 
     for (const list of taskLists) {
+      const listPath = formatListIdForUrl(list.id);
       const tasksRes = await fetch(
-        `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(list.id)}/tasks?showCompleted=false&showHidden=false&maxResults=100`,
+        `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks?showCompleted=false&showHidden=false&maxResults=100`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
           signal: controller.signal,
@@ -239,6 +240,28 @@ export async function fetchAllGoogleTasks(accessToken: string): Promise<{ listId
 }
 
 /**
+ * Safely formats a Google Task list ID for API URL paths.
+ * Explicitly preserves literal '@' and ':' which Google Tasks API requires (e.g. '@default', or IDs with colons).
+ */
+export function formatListIdForUrl(listId: string): string {
+  const trimmed = (listId || '@default').trim();
+  if (!trimmed || trimmed === '@default' || trimmed.toLowerCase() === '%40default') {
+    return '@default';
+  }
+  const decoded = decodeURIComponent(trimmed);
+  return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+}
+
+/**
+ * Safely formats a Google Task ID for API URL paths.
+ */
+export function formatTaskIdForUrl(taskId: string): string {
+  const trimmed = (taskId || '').trim();
+  const decoded = decodeURIComponent(trimmed);
+  return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+}
+
+/**
  * Ensures the 4 dedicated Google Task lists exist:
  * "Quick Jobs", "Responsibilities", "Projects", "Habits".
  * If any do not exist, creates them so the user has separate lists in their Google Tasks app/widget.
@@ -255,55 +278,52 @@ export async function ensureGoogleTaskLists(accessToken: string): Promise<Dedica
   const data = await listsRes.json();
   const existingLists: GoogleTaskList[] = data.items || [];
   const defaultList = existingLists[0] || { id: '@default', title: 'My Tasks' };
-
-  // Match existing lists case-insensitively
-  let quickJobs = existingLists.find((l) => /quick/i.test(l.title));
-  let responsibilities = existingLists.find((l) => /resp|bigger/i.test(l.title));
-  let projects = existingLists.find((l) => /project/i.test(l.title));
-  let habits = existingLists.find((l) => /habit/i.test(l.title));
+  const defaultListId = defaultList.id;
 
   const createList = async (title: string): Promise<GoogleTaskList> => {
-    try {
-      const res = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ title }),
-      });
-      if (res.ok) {
-        return await res.json();
-      }
-    } catch {}
-    return defaultList;
+    const res = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const errText = await res.text();
+    throw new Error(`Failed to create list "${title}" (${res.status}): ${errText}`);
   };
 
-  if (!quickJobs) {
-    if (/quick/i.test(defaultList.title)) {
-      quickJobs = defaultList;
-    } else {
-      quickJobs = await createList('Quick Jobs');
+  const getOrCreateDedicatedList = async (pattern: RegExp, defaultTitle: string): Promise<string> => {
+    // If only 1 list exists in account, we must create dedicated lists
+    const existing = existingLists.find(
+      (l) => pattern.test(l.title) && (existingLists.length === 1 ? false : l.id !== defaultListId)
+    );
+    if (existing && existing.id) {
+      return existing.id;
     }
-  }
+    try {
+      const created = await createList(defaultTitle);
+      existingLists.push(created);
+      return created.id;
+    } catch (e) {
+      console.warn(`Could not create dedicated Google Task list "${defaultTitle}":`, e);
+      return defaultListId;
+    }
+  };
 
-  if (!responsibilities) {
-    responsibilities = await createList('Responsibilities');
-  }
-
-  if (!projects) {
-    projects = await createList('Projects');
-  }
-
-  if (!habits) {
-    habits = await createList('Habits');
-  }
+  const quickJobsListId = await getOrCreateDedicatedList(/quick|quick\s*jobs|quick\s*tasks/i, 'Quick Jobs');
+  const responsibilitiesListId = await getOrCreateDedicatedList(/resp|bigger/i, 'Responsibilities');
+  const projectsListId = await getOrCreateDedicatedList(/project/i, 'Projects');
+  const habitsListId = await getOrCreateDedicatedList(/habit/i, 'Habits');
 
   return {
-    quickJobsListId: quickJobs.id || defaultList.id,
-    responsibilitiesListId: responsibilities.id || defaultList.id,
-    projectsListId: projects.id || defaultList.id,
-    habitsListId: habits.id || defaultList.id,
+    quickJobsListId,
+    responsibilitiesListId,
+    projectsListId,
+    habitsListId,
   };
 }
 
@@ -554,10 +574,10 @@ export function syncTasksIntoBoard(
 
       const noteSteps = parseStepsFromNotes(task.notes);
 
-      const projMatch = rawTitle.match(/^project:\s*(.+)$/i);
-      const respMatch = rawTitle.match(/^(?:job|bigger\s*job|resp|responsibility|bigger):\s*(.+)$/i);
-      const habitMatch = rawTitle.match(/^habit:\s*(.+)$/i);
-      const taskMatch = rawTitle.match(/^task:\s*(.+)$/i);
+      const projMatch = rawTitle.match(/^project(?::|\s+-|\s+)\s*(.+)$/i);
+      const respMatch = rawTitle.match(/^(?:job|bigger\s*job|resp|responsibility|bigger)(?::|\s+-|\s+)\s*(.+)$/i);
+      const habitMatch = rawTitle.match(/^habit(?::|\s+-|\s+)\s*(.+)$/i);
+      const taskMatch = rawTitle.match(/^task(?::|\s+-|\s+)\s*(.+)$/i);
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
 
       // 1. QUICK TASKS (Explicitly Tagged "Task: ...", or [1m], [5m], [15m])
@@ -811,7 +831,7 @@ export function syncTasksIntoBoard(
           targetListId: dedicatedLists.quickJobsListId,
           task,
           momentumType: 'quick',
-          title: `[5m] ${cleanGenericTitle}`,
+          title: `Task: [5m] ${cleanGenericTitle}`,
           notes: task.notes,
         });
       }
@@ -869,9 +889,11 @@ export async function markGoogleTaskCompleted(
   taskId: string
 ): Promise<void> {
   try {
-    const targetList = listId || '@default';
+    const targetList = !listId || listId === '@default' ? '@default' : listId;
+    const listPath = formatListIdForUrl(targetList);
+    const taskPath = formatTaskIdForUrl(taskId);
     const res = await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks/${encodeURIComponent(taskId)}`,
+      `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
       {
         method: 'PATCH',
         headers: {
@@ -886,8 +908,9 @@ export async function markGoogleTaskCompleted(
         const allLists = await fetchAllGoogleTasks(accessToken);
         for (const l of allLists) {
           if (l.listId !== targetList) {
+            const altListPath = formatListIdForUrl(l.listId);
             await fetch(
-              `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(l.listId)}/tasks/${encodeURIComponent(taskId)}`,
+              `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
               {
                 method: 'PATCH',
                 headers: {
@@ -907,7 +930,7 @@ export async function markGoogleTaskCompleted(
 }
 
 /**
- * Permanently delete a task on Google Tasks when removed from Momentum
+ * Permanently delete a task on Google Tasks when removed from Momentum or relocated
  */
 export async function deleteGoogleTask(
   accessToken: string,
@@ -915,9 +938,11 @@ export async function deleteGoogleTask(
   taskId: string
 ): Promise<void> {
   try {
-    const targetList = listId || '@default';
+    const targetList = !listId || listId === '@default' ? '@default' : listId;
+    const listPath = formatListIdForUrl(targetList);
+    const taskPath = formatTaskIdForUrl(taskId);
     const res = await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks/${encodeURIComponent(taskId)}`,
+      `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
       {
         method: 'DELETE',
         headers: {
@@ -925,21 +950,28 @@ export async function deleteGoogleTask(
         },
       }
     );
-    if (!res.ok && res.status === 404) {
-      try {
-        const allLists = await fetchAllGoogleTasks(accessToken);
-        for (const l of allLists) {
-          if (l.listId !== targetList) {
-            await fetch(
-              `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(l.listId)}/tasks/${encodeURIComponent(taskId)}`,
-              {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` },
-              }
-            );
+    if (!res.ok && res.status !== 204) {
+      if (res.status === 404) {
+        try {
+          const allLists = await fetchAllGoogleTasks(accessToken);
+          for (const l of allLists) {
+            if (l.listId !== targetList) {
+              const altListPath = formatListIdForUrl(l.listId);
+              const retryRes = await fetch(
+                `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
+                {
+                  method: 'DELETE',
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                }
+              );
+              if (retryRes.ok || retryRes.status === 204) break;
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      } else {
+        const errText = await res.text();
+        console.warn(`Failed to delete Google task ${taskId} from ${targetList}:`, res.status, errText);
+      }
     }
   } catch (e) {
     console.warn('Failed to delete task from Google Tasks:', e);
@@ -956,6 +988,7 @@ export async function createGoogleTask(
   notes?: string
 ): Promise<string> {
   const targetList = !listId || listId === '@default' ? '@default' : listId;
+  const listPath = formatListIdForUrl(targetList);
   const payload: any = {
     title: title.trim(),
     status: 'needsAction',
@@ -965,7 +998,7 @@ export async function createGoogleTask(
   }
 
   const res = await fetch(
-    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(targetList)}/tasks`,
+    `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks`,
     {
       method: 'POST',
       headers: {
@@ -978,34 +1011,7 @@ export async function createGoogleTask(
 
   if (!res.ok) {
     const errText = await res.text();
-    // If target list returned 404, fallback to first real list in users/@me/lists
-    if (res.status === 404) {
-      const listsRes = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (listsRes.ok) {
-        const listsData = await listsRes.json();
-        const fallbackListId = (listsData.items || [])[0]?.id;
-        if (fallbackListId && fallbackListId !== targetList) {
-          const retryRes = await fetch(
-            `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(fallbackListId)}/tasks`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(payload),
-            }
-          );
-          if (retryRes.ok) {
-            const data = await retryRes.json();
-            return data.id;
-          }
-        }
-      }
-    }
-    throw new Error(`Google Tasks API create error (${res.status}): ${errText}`);
+    throw new Error(`Google Tasks API create error (${res.status}) on list "${listPath}": ${errText}`);
   }
 
   const data = await res.json();
