@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   TrendingUp,
+  Pencil,
+  X,
 } from 'lucide-react';
 
 export const HabitsPanel: React.FC = () => {
@@ -22,6 +24,7 @@ export const HabitsPanel: React.FC = () => {
     toggleHabitDate,
     setHabitDuration,
     addHabit,
+    editHabit,
     deleteHabit,
     panelStates,
     cyclePanelLevel,
@@ -34,6 +37,33 @@ export const HabitsPanel: React.FC = () => {
   const [viewTab, setViewTab] = useState<'today' | 'monthly'>('today');
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [inlineCalendarHabitId, setInlineCalendarHabitId] = useState<string | null>(null);
+
+  // Inline edit & expand state
+  const [expandedHabitId, setExpandedHabitId] = useState<string | null>(null);
+  const [editingHabitId, setEditingHabitId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editNextDue, setEditNextDue] = useState('');
+
+  const startEditing = (h: Habit) => {
+    setEditingHabitId(h.id);
+    setEditName(h.name);
+    setEditNextDue(h.next_due || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingHabitId(null);
+    setEditName('');
+    setEditNextDue('');
+  };
+
+  const saveEdit = (habitId: string) => {
+    if (!editName.trim()) return;
+    editHabit(habitId, {
+      name: editName.trim(),
+      next_due: editNextDue.trim() || null,
+    });
+    setEditingHabitId(null);
+  };
 
   const level = panelStates.habits; // 'collapsed' | 'compact' | 'expanded'
   const habits = boardData.habits;
@@ -395,88 +425,165 @@ export const HabitsPanel: React.FC = () => {
                 const stats = getHabitMonthStats(habit);
                 const isCalendarOpen = inlineCalendarHabitId === habit.id;
 
+                const isExpanded = expandedHabitId === habit.id;
+                const isEditing = editingHabitId === habit.id;
+
                 return (
                   <div
                     key={habit.id}
-                    className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700 transition space-y-1.5"
+                    className={`p-2 rounded-xl border transition space-y-1.5 ${
+                      isExpanded || isEditing
+                        ? 'bg-pink-50/50 dark:bg-pink-950/30 border-pink-300 dark:border-pink-800 shadow-xs'
+                        : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                            {habit.name}
-                          </span>
-                          {habit.next_due && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 shrink-0 flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5" />
-                              <span>{habit.next_due}</span>
-                            </span>
-                          )}
+                    {isEditing ? (
+                      /* Inline Edit Mode */
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          saveEdit(habit.id);
+                        }}
+                        className="space-y-2 animate-fadeIn text-xs"
+                      >
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Habit Name</label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-900 border border-pink-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                            autoFocus
+                          />
                         </div>
-
-                        {/* Monthly Accountability Badge Pill */}
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Scheduled Timing / Cadence</label>
+                          <input
+                            type="text"
+                            value={editNextDue}
+                            onChange={(e) => setEditNextDue(e.target.value)}
+                            placeholder="e.g. Daily Morning, 5:30 PM..."
+                            className="w-full bg-white dark:bg-slate-900 border border-pink-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                          />
+                        </div>
+                        <div className="flex items-center justify-end gap-1.5 pt-1">
                           <button
                             type="button"
-                            onClick={() =>
-                              setInlineCalendarHabitId(
-                                isCalendarOpen ? null : habit.id
-                              )
-                            }
-                            className="text-[10px] font-semibold text-pink-600 dark:text-pink-400 hover:underline flex items-center gap-1"
-                            title="Click to view full month calendar"
+                            onClick={cancelEdit}
+                            className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
                           >
-                            <CalendarIcon className="w-2.5 h-2.5" />
-                            <span>
-                              {stats.count}/{stats.total} days in {monthLabel} ({stats.percentage}%)
-                            </span>
+                            <X className="w-3.5 h-3.5" />
                           </button>
-                        </div>
-                      </div>
-
-                      {/* Daily Check Actions */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {habit.type === 'boolean' ? (
                           <button
-                            onClick={() => toggleHabitDate(habit.id, todayStr)}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                              isDone
-                                ? 'bg-emerald-600 text-white shadow-xs'
-                                : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                            }`}
+                            type="submit"
+                            disabled={!editName.trim()}
+                            className="px-3 py-1 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            <span>{isDone ? 'Done' : 'Check'}</span>
+                            <span>Save</span>
                           </button>
-                        ) : (
-                          <div className="flex items-center gap-1 text-[11px]">
-                            <span className="font-mono font-bold text-pink-600 dark:text-pink-400">
-                              {typeof todayVal === 'number' ? `${todayVal}m` : '0m'}
-                            </span>
+                        </div>
+                      </form>
+                    ) : (
+                      /* Display Mode */
+                      <>
+                        <div className="flex items-start justify-between gap-2">
+                          <div
+                            className="min-w-0 flex-1 cursor-pointer select-none"
+                            onClick={() => setExpandedHabitId(isExpanded ? null : habit.id)}
+                            title={isExpanded ? 'Click to collapse' : 'Click to view full entry / edit'}
+                          >
+                            <div className="flex items-start gap-1.5 min-w-0">
+                              <span
+                                className={`text-xs font-bold text-slate-800 dark:text-slate-100 ${
+                                  isExpanded ? 'break-words whitespace-normal' : 'truncate'
+                                }`}
+                              >
+                                {habit.name}
+                              </span>
+                              {habit.next_due && (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 shrink-0 flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{habit.next_due}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Monthly Accountability Badge Pill */}
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setInlineCalendarHabitId(
+                                    isCalendarOpen ? null : habit.id
+                                  );
+                                }}
+                                className="text-[10px] font-semibold text-pink-600 dark:text-pink-400 hover:underline flex items-center gap-1"
+                                title="Click to view full month calendar"
+                              >
+                                <CalendarIcon className="w-2.5 h-2.5" />
+                                <span>
+                                  {stats.count}/{stats.total} days in {monthLabel} ({stats.percentage}%)
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Daily Check Actions */}
+                          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            {habit.type === 'boolean' ? (
+                              <button
+                                onClick={() => toggleHabitDate(habit.id, todayStr)}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                                  isDone
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                                }`}
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>{isDone ? 'Done' : 'Check'}</span>
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <span className="font-mono font-bold text-pink-600 dark:text-pink-400">
+                                  {typeof todayVal === 'number' ? `${todayVal}m` : '0m'}
+                                </span>
+                                <button
+                                  onClick={() =>
+                                    setHabitDuration(
+                                      habit.id,
+                                      todayStr,
+                                      (typeof todayVal === 'number' ? todayVal : 0) + 15
+                                    )
+                                  }
+                                  className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold"
+                                >
+                                  +15m
+                                </button>
+                              </div>
+                            )}
+
                             <button
-                              onClick={() =>
-                                setHabitDuration(
-                                  habit.id,
-                                  todayStr,
-                                  (typeof todayVal === 'number' ? todayVal : 0) + 15
-                                )
-                              }
-                              className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold"
+                              type="button"
+                              onClick={() => startEditing(habit)}
+                              className="p-1 text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 transition"
+                              title="Edit habit"
                             >
-                              +15m
+                              <Pencil className="w-3 h-3" />
+                            </button>
+
+                            <button
+                              onClick={() => deleteHabit(habit.id)}
+                              className="p-1 text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
+                              title="Delete habit"
+                            >
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
-                        )}
-
-                        <button
-                          onClick={() => deleteHabit(habit.id)}
-                          className="p-1 text-slate-400 hover:text-rose-500 transition"
-                          title="Delete habit"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
+                        </div>
+                      </>
+                    )}
 
                     {/* Inline Monthly Grid (when clicked) */}
                     {isCalendarOpen && (

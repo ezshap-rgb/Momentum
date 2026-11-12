@@ -583,7 +583,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             </div>
 
             <div className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-              Momentum v2.5 • Build 2026-11-11 1:15 PM • Dedicated Lists Auto-Relocate
+              Momentum v2.5 • Build 2026-11-12 12:20 PM • Tasks & Jobs Renamed • Inline Edit & Full View • Timing At End
             </div>
           </div>
         </form>

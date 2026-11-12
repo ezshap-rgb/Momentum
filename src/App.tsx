@@ -160,7 +160,7 @@ function CockpitDashboard() {
               </span>
             )}
           </div>
-          <span className="text-[10px]">Quick</span>
+          <span className="text-[10px]">Tasks</span>
         </button>
 
         <button
@@ -205,7 +205,7 @@ function CockpitDashboard() {
               </span>
             )}
           </div>
-          <span className="text-[10px]">Bigger</span>
+          <span className="text-[10px]">Jobs</span>
         </button>
 
         <button

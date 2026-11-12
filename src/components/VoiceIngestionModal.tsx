@@ -183,7 +183,7 @@ export const VoiceIngestionModal: React.FC<VoiceIngestionModalProps> = ({
 
               {stagedData.quick_jobs && stagedData.quick_jobs.length > 0 && (
                 <div>
-                  <strong className="text-[10px] uppercase text-slate-500 block">Quick Jobs:</strong>
+                  <strong className="text-[10px] uppercase text-slate-500 block">Tasks:</strong>
                   <ul className="list-disc list-inside space-y-0.5 text-slate-700 dark:text-slate-200">
                     {stagedData.quick_jobs.map((j, i) => (
                       <li key={i}>
@@ -196,7 +196,7 @@ export const VoiceIngestionModal: React.FC<VoiceIngestionModalProps> = ({
 
               {stagedData.responsibilities && stagedData.responsibilities.length > 0 && (
                 <div>
-                  <strong className="text-[10px] uppercase text-slate-500 block">Responsibilities:</strong>
+                  <strong className="text-[10px] uppercase text-slate-500 block">Jobs:</strong>
                   <ul className="space-y-0.5 text-slate-700 dark:text-slate-200">
                     {stagedData.responsibilities.map((r, i) => (
                       <li key={i}>

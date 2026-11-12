@@ -12,6 +12,8 @@ import {
   Minimize2,
   Check,
   ListOrdered,
+  Pencil,
+  X,
 } from 'lucide-react';
 
 export const ProjectsPanel: React.FC = () => {
@@ -21,6 +23,7 @@ export const ProjectsPanel: React.FC = () => {
     deleteProject,
     completeProjectStep,
     updateProjectProgress,
+    editProject,
     panelStates,
     cyclePanelLevel,
   } = useMomentum();
@@ -33,6 +36,36 @@ export const ProjectsPanel: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newPosition, setNewPosition] = useState('');
   const [newNextStep, setNewNextStep] = useState('');
+
+  // Inline edit state
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editNextStep, setEditNextStep] = useState('');
+  const [editPosition, setEditPosition] = useState('');
+
+  const startEditing = (p: Project) => {
+    setEditingProjectId(p.id);
+    setEditName(p.name);
+    setEditNextStep(p.next_step);
+    setEditPosition(p.current_position || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingProjectId(null);
+    setEditName('');
+    setEditNextStep('');
+    setEditPosition('');
+  };
+
+  const saveEdit = (projectId: string) => {
+    if (!editName.trim()) return;
+    editProject(projectId, {
+      name: editName.trim(),
+      next_step: editNextStep.trim() || undefined,
+      current_position: editPosition.trim() || undefined,
+    });
+    setEditingProjectId(null);
+  };
 
   const level = panelStates.projects; // 'collapsed' | 'compact' | 'expanded'
   const projects = boardData.projects;
@@ -195,95 +228,181 @@ export const ProjectsPanel: React.FC = () => {
               const isDetailsExpanded =
                 level === 'expanded' || expandedProjectId === project.id;
               const isFocus = boardData.current_focus_project_id === project.id;
+              const isEditing = editingProjectId === project.id;
 
               return (
                 <div
                   key={project.id}
-                  className="p-1.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:border-slate-200 dark:hover:border-slate-700 transition space-y-1"
+                  className={`p-2 rounded-xl border transition space-y-1.5 ${
+                    isDetailsExpanded || isEditing
+                      ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800 shadow-xs'
+                      : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700'
+                  }`}
                 >
-                  {/* Name Row */}
-                  <div
-                    onClick={() =>
-                      setExpandedProjectId(
-                        expandedProjectId === project.id ? null : project.id
-                      )
-                    }
-                    className="flex items-center justify-between gap-2 cursor-pointer select-none"
-                  >
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span
-                        className={`w-2 h-2 rounded-full ${getStatusColor(
-                          project.status
-                        )} shrink-0`}
-                        title={`Status: ${project.status}`}
-                      />
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                        {project.name}
-                      </span>
-                      {isFocus && (
-                        <span className="text-[9px] px-1 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium shrink-0">
-                          Focus
-                        </span>
-                      )}
-                    </div>
-
-                    <div
-                      className="flex items-center gap-1 shrink-0"
-                      onClick={(e) => e.stopPropagation()}
+                  {isEditing ? (
+                    /* Inline Edit Mode */
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveEdit(project.id);
+                      }}
+                      className="space-y-2 animate-fadeIn text-xs"
                     >
-                      <button
-                        onClick={() => setInspectingProject(project)}
-                        className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-800 hover:bg-blue-600 hover:text-white transition"
-                        title="Open Where Was I? inspector"
-                      >
-                        Where Was I?
-                      </button>
-                      <button
-                        onClick={() => deleteProject(project.id)}
-                        className="p-1 text-slate-400 hover:text-rose-500 transition"
-                        title="Delete project"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Next Step Action Bar */}
-                  <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-center justify-between gap-2 text-[11px]">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <ArrowRight className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                      <span className="font-semibold text-blue-950 dark:text-blue-100 truncate">
-                        {project.next_step}
-                      </span>
-                      {project.upcoming_steps && project.upcoming_steps.length > 0 && (
-                        <span
-                          className="text-[9px] px-1 py-0.2 rounded font-mono bg-blue-200 dark:bg-blue-900 text-blue-800 dark:text-blue-300 shrink-0 flex items-center gap-0.5"
-                          title={`${project.upcoming_steps.length} upcoming queued steps`}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Project Name</label>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-blue-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Immediate Next Step</label>
+                          <input
+                            type="text"
+                            value={editNextStep}
+                            onChange={(e) => setEditNextStep(e.target.value)}
+                            placeholder="Next action..."
+                            className="w-full bg-white dark:bg-slate-900 border border-blue-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Current Position / Where Holding</label>
+                          <input
+                            type="text"
+                            value={editPosition}
+                            onChange={(e) => setEditPosition(e.target.value)}
+                            placeholder="Where holding..."
+                            className="w-full bg-white dark:bg-slate-900 border border-blue-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
                         >
-                          <ListOrdered className="w-2.5 h-2.5" />
-                          <span>+{project.upcoming_steps.length}</span>
-                        </span>
-                      )}
-                    </div>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!editName.trim()}
+                          className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Save</span>
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    /* Display Mode */
+                    <>
+                      {/* Name Row */}
+                      <div
+                        onClick={() =>
+                          setExpandedProjectId(
+                            expandedProjectId === project.id ? null : project.id
+                          )
+                        }
+                        className="flex items-start justify-between gap-2 cursor-pointer select-none"
+                        title={isDetailsExpanded ? 'Click to collapse' : 'Click to view full entry / edit'}
+                      >
+                        <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                          <span
+                            className={`w-2 h-2 rounded-full mt-1 ${getStatusColor(
+                              project.status
+                            )} shrink-0`}
+                            title={`Status: ${project.status}`}
+                          />
+                          <span
+                            className={`text-xs font-bold text-slate-800 dark:text-slate-100 ${
+                              isDetailsExpanded ? 'break-words whitespace-normal' : 'truncate'
+                            }`}
+                          >
+                            {project.name}
+                          </span>
+                          {isFocus && (
+                            <span className="text-[9px] px-1 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium shrink-0">
+                              Focus
+                            </span>
+                          )}
+                        </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleStepDone(project)}
-                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center gap-1 shadow-xs"
-                        title="Complete this physical step"
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>Done</span>
-                      </button>
-                      <button
-                        onClick={() => setInspectingProject(project)}
-                        className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline px-1"
-                        title="Open Where Was I? update modal"
-                      >
-                        Update &rarr;
-                      </button>
-                    </div>
-                  </div>
+                        <div
+                          className="flex items-center gap-1 shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => startEditing(project)}
+                            className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
+                            title="Quick Edit Project"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => setInspectingProject(project)}
+                            className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-200 dark:bg-slate-800 hover:bg-blue-600 hover:text-white transition"
+                            title="Open Where Was I? inspector"
+                          >
+                            Where Was I?
+                          </button>
+                          <button
+                            onClick={() => deleteProject(project.id)}
+                            className="p-1 text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
+                            title="Delete project"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Next Step Action Bar */}
+                      <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-start justify-between gap-2 text-[11px]">
+                        <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                          <ArrowRight className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                          <span
+                            className={`font-semibold text-blue-950 dark:text-blue-100 ${
+                              isDetailsExpanded ? 'break-words whitespace-normal' : 'truncate'
+                            }`}
+                          >
+                            {project.next_step}
+                          </span>
+                          {project.upcoming_steps && project.upcoming_steps.length > 0 && (
+                            <span
+                              className="text-[9px] px-1 py-0.2 rounded font-mono bg-blue-200 dark:bg-blue-900 text-blue-800 dark:text-blue-300 shrink-0 flex items-center gap-0.5"
+                              title={`${project.upcoming_steps.length} upcoming queued steps`}
+                            >
+                              <ListOrdered className="w-2.5 h-2.5" />
+                              <span>+{project.upcoming_steps.length}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleStepDone(project)}
+                            className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition flex items-center gap-1 shadow-xs"
+                            title="Complete this physical step"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Done</span>
+                          </button>
+                          <button
+                            onClick={() => setInspectingProject(project)}
+                            className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline px-1"
+                            title="Open Where Was I? update modal"
+                          >
+                            Update &rarr;
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {/* Inline Step Completion Prompt */}
                   {completingProjectId === project.id && (

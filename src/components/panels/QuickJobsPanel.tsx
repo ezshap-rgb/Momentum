@@ -4,21 +4,27 @@ import { QuickJobDuration } from '../../types';
 import {
   Zap,
   Circle,
-  CheckCircle2,
+  Check,
+  X,
   Plus,
   Trash2,
   ChevronDown,
   Maximize2,
   Minimize2,
+  Pencil,
 } from 'lucide-react';
 
 export const QuickJobsPanel: React.FC = () => {
-  const { boardData, addQuickJob, toggleQuickJob, deleteQuickJob, panelStates, cyclePanelLevel } =
+  const { boardData, addQuickJob, toggleQuickJob, deleteQuickJob, editQuickJob, panelStates, cyclePanelLevel } =
     useMomentum();
 
   const [newTitle, setNewTitle] = useState('');
   const [newDuration, setNewDuration] = useState<QuickJobDuration>('5m');
   const [filterDuration, setFilterDuration] = useState<'all' | '1m' | '5m' | '15m'>('all');
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDuration, setEditDuration] = useState<QuickJobDuration>('5m');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const level = panelStates.quick_jobs; // 'collapsed' | 'compact' | 'expanded'
@@ -41,6 +47,26 @@ export const QuickJobsPanel: React.FC = () => {
     setNewTitle('');
   };
 
+  const startEditing = (job: { id: string; title: string; duration?: QuickJobDuration }) => {
+    setEditingJobId(job.id);
+    setEditTitle(job.title);
+    setEditDuration(job.duration || '5m');
+    setExpandedJobId(job.id);
+  };
+
+  const saveEdit = (id: string) => {
+    if (!editTitle.trim()) return;
+    editQuickJob(id, {
+      title: editTitle.trim(),
+      duration: editDuration,
+    });
+    setEditingJobId(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingJobId(null);
+  };
+
   const getDurationBadge = (d?: QuickJobDuration) => {
     const val = d || '5m';
     const colorClasses =
@@ -53,7 +79,7 @@ export const QuickJobsPanel: React.FC = () => {
     return (
       <span
         className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md border ${colorClasses} shrink-0`}
-        title={`${val} quick task`}
+        title={`${val} task`}
       >
         {val}
       </span>
@@ -72,7 +98,7 @@ export const QuickJobsPanel: React.FC = () => {
             <Zap className="w-3.5 h-3.5" />
           </div>
           <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-100 truncate">
-            Quick Jobs
+            Tasks
           </span>
           <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
             {activeJobs.length}
@@ -90,7 +116,7 @@ export const QuickJobsPanel: React.FC = () => {
               setTimeout(() => inputRef.current?.focus(), 100);
             }}
             className="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
-            title="Add Quick Job"
+            title="Add Task"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -130,7 +156,7 @@ export const QuickJobsPanel: React.FC = () => {
               type="text"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Type quick task here (e.g. Call Sam)..."
+              placeholder="Type task here (e.g. Call Sam)..."
               autoComplete="off"
               enterKeyHint="done"
               className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
@@ -154,7 +180,7 @@ export const QuickJobsPanel: React.FC = () => {
             <button
               type="submit"
               className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition shrink-0 cursor-pointer flex items-center justify-center shadow-xs"
-              title="Add Quick Job"
+              title="Add Task"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -186,40 +212,131 @@ export const QuickJobsPanel: React.FC = () => {
           <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
             {filteredActive.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-4 italic">
-                No quick jobs pending.
+                No tasks pending.
               </p>
             )}
 
-            {filteredActive.map((job) => (
-              <div
-                key={job.id}
-                className="group flex items-center justify-between gap-2 p-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-850 border border-transparent hover:border-slate-200 dark:hover:border-slate-800 transition"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    onClick={() => toggleQuickJob(job.id)}
-                    className="text-slate-400 hover:text-emerald-500 transition shrink-0"
-                    title="Mark done"
-                  >
-                    <Circle className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
-                    {job.title}
-                  </span>
-                </div>
+            {filteredActive.map((job) => {
+              const isEditing = editingJobId === job.id;
+              const isExpanded = expandedJobId === job.id;
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {getDurationBadge(job.duration)}
-                  <button
-                    onClick={() => deleteQuickJob(job.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 transition"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+              return (
+                <div
+                  key={job.id}
+                  onClick={() => {
+                    if (!isEditing) {
+                      setExpandedJobId(isExpanded ? null : job.id);
+                    }
+                  }}
+                  className={`group p-2 rounded-xl border transition cursor-pointer select-text ${
+                    isExpanded || isEditing
+                      ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 shadow-xs'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-850 border-slate-100 dark:border-slate-800/60'
+                  }`}
+                  title={isEditing ? '' : isExpanded ? 'Click to collapse' : 'Click to view full entry / edit'}
+                >
+                  {isEditing ? (
+                    /* Inline Edit Mode */
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveEdit(job.id);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="space-y-2 animate-fadeIn"
+                    >
+                      <textarea
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-emerald-400 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
+                        rows={2}
+                        autoFocus
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px]">
+                          {(['1m', '5m', '15m'] as QuickJobDuration[]).map((dur) => (
+                            <button
+                              key={dur}
+                              type="button"
+                              onClick={() => setEditDuration(dur)}
+                              className={`px-2 py-0.5 rounded font-bold transition ${
+                                editDuration === dur
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                              }`}
+                            >
+                              {dur}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!editTitle.trim()}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Save</span>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    /* Display Mode: Click to view whole entry (no cutoff) and edit */
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleQuickJob(job.id);
+                          }}
+                          className="mt-0.5 text-slate-400 hover:text-emerald-500 transition shrink-0"
+                          title="Mark done"
+                        >
+                          <Circle className="w-3.5 h-3.5" />
+                        </button>
+                        <span
+                          className={`text-xs font-medium text-slate-800 dark:text-slate-100 ${
+                            isExpanded ? 'break-words whitespace-normal' : 'truncate'
+                          }`}
+                        >
+                          {job.title}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {getDurationBadge(job.duration)}
+                        <button
+                          type="button"
+                          onClick={() => startEditing(job)}
+                          className="p-1 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+                          title="Edit task"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteQuickJob(job.id)}
+                          className="p-1 text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Completed summary in Expanded Mode */}

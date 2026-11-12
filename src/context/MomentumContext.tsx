@@ -74,11 +74,12 @@ interface MomentumContextType {
   setPanelLevel: (panel: keyof Omit<PanelStates, 'calendar'>, level: PanelLevel) => void;
   cyclePanelLevel: (panel: keyof Omit<PanelStates, 'calendar'>) => void;
   setCalendarView: (view: 'hidden' | 'week' | 'month') => void;
-  // Quick jobs (1m, 5m, 15m)
+  // Quick jobs (Tasks)
   addQuickJob: (title: string, duration?: QuickJobDuration, due?: string | null) => void;
   toggleQuickJob: (id: string) => void;
   deleteQuickJob: (id: string) => void;
-  // Responsibilities
+  editQuickJob: (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => void;
+  // Responsibilities (Jobs)
   addResponsibility: (title: string, initialNextStep: string, due?: string | null) => void;
   advanceResponsibilityStep: (id: string) => void;
   regressResponsibilityStep: (id: string) => void;
@@ -86,6 +87,15 @@ interface MomentumContextType {
   updateResponsibilityDue: (id: string, due: string | null) => void;
   setResponsibilityStatus: (id: string, status: ResponsibilityStatus) => void;
   deleteResponsibility: (id: string) => void;
+  editResponsibility: (
+    id: string,
+    updates: {
+      title?: string;
+      currentStep?: string;
+      due?: string | null;
+      steps?: string[];
+    }
+  ) => void;
   // Projects
   addProject: (name: string, current_position: string, next_step: string) => void;
   updateProjectProgress: (
@@ -99,11 +109,28 @@ interface MomentumContextType {
   setFocusProject: (id: string | null) => void;
   deleteProject: (id: string) => void;
   completeProjectStep: (id: string, newNextStep?: string) => void;
+  editProject: (
+    id: string,
+    updates: {
+      name?: string;
+      current_position?: string;
+      next_step?: string;
+      status?: ProjectStatus;
+    }
+  ) => void;
   // Habits
   toggleHabitDate: (id: string, dateStr: string) => void;
   setHabitDuration: (id: string, dateStr: string, minutes: number) => void;
   addHabit: (name: string, type: 'boolean' | 'duration_min', target: number, nextDue?: string) => void;
   deleteHabit: (id: string) => void;
+  editHabit: (
+    id: string,
+    updates: {
+      name?: string;
+      next_due?: string | null;
+      target?: number;
+    }
+  ) => void;
   // Calendar Events
   addCalendarEvent: (event: Omit<CalendarEvent, 'id'>) => void;
   deleteCalendarEvent: (id: string) => void;
@@ -247,8 +274,8 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } else {
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
-          const listId = settings.googleTaskListsMap?.quickJobsListId || '@default';
-          createGoogleTask(token, listId, `Task: [${jobDuration}] ${cleanTitle}`).then((taskId) => {
+          const listId = settings.googleTaskListsMap?.tasksListId || settings.googleTaskListsMap?.quickJobsListId || '@default';
+          createGoogleTask(token, listId, `Task: ${cleanTitle} [${jobDuration}]`).then((taskId) => {
             if (taskId) {
               updateBoard((prev) => ({
                 ...prev,
@@ -260,6 +287,24 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     },
     [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap]
+  );
+
+  const editQuickJob = useCallback(
+    (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => {
+      updateBoard((prev) => ({
+        ...prev,
+        quick_jobs: prev.quick_jobs.map((j) => {
+          if (j.id !== id) return j;
+          return {
+            ...j,
+            title: updates.title !== undefined ? updates.title.trim() : j.title,
+            duration: updates.duration || j.duration,
+            due: updates.due !== undefined ? updates.due : j.due,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
   );
 
   const toggleQuickJob = useCallback(
@@ -339,7 +384,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Background push to Google Tasks
       const token = getStoredAccessToken();
       if (token && settings.googleTasksConnected) {
-        const listId = settings.googleTaskListsMap?.responsibilitiesListId || '@default';
+        const listId = settings.googleTaskListsMap?.jobsListId || settings.googleTaskListsMap?.responsibilitiesListId || '@default';
         const taskTitle = `Job: ${newResp.title} -> ${newResp.steps[0]}`;
         createGoogleTask(token, listId, taskTitle).then((taskId) => {
           if (taskId) {
@@ -471,6 +516,36 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     },
     [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  const editResponsibility = useCallback(
+    (
+      id: string,
+      updates: {
+        title?: string;
+        currentStep?: string;
+        due?: string | null;
+        steps?: string[];
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          let newSteps = updates.steps ? [...updates.steps] : [...r.steps];
+          if (updates.currentStep && updates.currentStep.trim()) {
+            newSteps[r.current_step_index] = updates.currentStep.trim();
+          }
+          return {
+            ...r,
+            title: updates.title !== undefined ? updates.title.trim() : r.title,
+            due: updates.due !== undefined ? updates.due : r.due,
+            steps: newSteps,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
   );
 
   // Projects
@@ -652,6 +727,35 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [updateBoard]
   );
 
+  const editProject = useCallback(
+    (
+      id: string,
+      updates: {
+        name?: string;
+        current_position?: string;
+        next_step?: string;
+        status?: ProjectStatus;
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) => {
+          if (p.id !== id) return p;
+          return {
+            ...p,
+            name: updates.name !== undefined ? updates.name.trim() : p.name,
+            current_position:
+              updates.current_position !== undefined ? updates.current_position.trim() : p.current_position,
+            next_step: updates.next_step !== undefined ? updates.next_step.trim() : p.next_step,
+            status: updates.status || p.status,
+            last_updated: Date.now(),
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
   // Habits
   const toggleHabitDate = useCallback(
     (id: string, dateStr: string) => {
@@ -716,6 +820,31 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updateBoard((prev) => ({
         ...prev,
         habits: prev.habits.filter((h) => h.id !== id),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const editHabit = useCallback(
+    (
+      id: string,
+      updates: {
+        name?: string;
+        next_due?: string | null;
+        target?: number;
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        habits: prev.habits.map((h) => {
+          if (h.id !== id) return h;
+          return {
+            ...h,
+            name: updates.name !== undefined ? updates.name.trim() : h.name,
+            next_due: updates.next_due !== undefined ? updates.next_due : h.next_due,
+            target: updates.target !== undefined ? updates.target : h.target,
+          };
+        }),
       }));
     },
     [updateBoard]
@@ -1174,6 +1303,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addQuickJob,
         toggleQuickJob,
         deleteQuickJob,
+        editQuickJob,
         addResponsibility,
         advanceResponsibilityStep,
         regressResponsibilityStep,
@@ -1181,16 +1311,19 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateResponsibilityDue,
         setResponsibilityStatus,
         deleteResponsibility,
+        editResponsibility,
         addProject,
         updateProjectProgress,
         setProjectStatus,
         setFocusProject,
         deleteProject,
         completeProjectStep,
+        editProject,
         toggleHabitDate,
         setHabitDuration,
         addHabit,
         deleteHabit,
+        editHabit,
         addCalendarEvent,
         deleteCalendarEvent,
         applyGeminiParsedData,

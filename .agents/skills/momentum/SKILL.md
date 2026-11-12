@@ -2,7 +2,7 @@
 name: momentum
 description: >-
   ADHD-optimized productivity cockpit data entry and board manager.
-  Use whenever the user wants to add quick jobs, update responsibilities, log project progress,
+  Use whenever the user wants to add tasks, update jobs, log project progress,
   check habits, or do a voice/text brain dump into their Momentum cockpit.
 ---
 
@@ -18,13 +18,15 @@ When this file is modified, Vite's Hot Module Replacement (HMR) automatically pu
 
 ## The 4 Core Activity Types
 
-### 1. Quick Jobs (`quick_jobs`)
-Bite-sized, 1-sitting tasks with clear speed markings:
-- Duration: `'1m' | '5m' | '15m'`
+### 1. Tasks (`quick_jobs`)
+Bite-sized, 1-sitting tasks with clear speed markings placed at the **END** of the entry:
+- Duration: `'1m' | '5m' | '15m'` (default `5m`)
+- Google Tasks title format: `Task: Call dentist [5m]` (Timing label placed at the end so it does not clutter mobile widgets and notification previews).
 - Schema: `{ id: string, title: string, duration: '1m' | '5m' | '15m', done: boolean, createdAt: number }`
 
-### 2. Bigger Responsibilities (`responsibilities`)
+### 2. Jobs (`responsibilities`)
 Multi-step commitments where only the single immediate next action is shown on the dashboard:
+- Google Tasks title format: `Job: Title -> Step 1 action`
 - Schema:
   ```ts
   {
@@ -32,7 +34,7 @@ Multi-step commitments where only the single immediate next action is shown on t
     title: string,
     steps: string[],
     current_step_index: number,
-    due: string | null, // e.g. "Tomorrow, 2:00 PM"
+    due: string | null, // e.g. "Tuesday 2:00 PM"
     status: 'active' | 'waiting' | 'paused' | 'done',
     createdAt: number
   }
@@ -56,7 +58,7 @@ Long-term creative or engineering initiatives that need context continuity ("Whe
   ```
 
 ### 4. Habits & Daily Rhythms (`habits`)
-Guilt-free routines tracked with next upcoming responsibility timing:
+Guilt-free routines tracked with next upcoming cadence/timing:
 - Schema:
   ```ts
   {
@@ -70,17 +72,20 @@ Guilt-free routines tracked with next upcoming responsibility timing:
   ```
 
 ## Google Tasks & Gemini Voice/Chat Ingestion Keywords
+The cockpit auto-syncs with 4 dedicated Google Task lists: **Tasks**, **Jobs**, **Projects**, and **Habits**.
+
 When creating tasks in Google Tasks via voice, Gemini, or chat:
-- **Task** (Quick Task): `Task: Task name` or `Task: [5m] Task name` (or `[1m]`, `[5m]`, `[15m]`, or untagged default)
-- **Job / Bigger Job** (Bigger Responsibility):
-  - Title: `Job: Title -> Step 1 action` or `Bigger Job: Title -> Step 1 action` (or `Resp: ...`)
-  - Notes:
+- **Task** (Quick Task):
+  - Format: `Task: Task name [5m]` (or `[1m]`, `[5m]`, `[15m]`, or untagged default). Note: `[5m]` is placed at the end so it doesn't crowd out the task name in widgets.
+- **Job** (Bigger Responsibility):
+  - Format: `Job: Title -> Step 1 action` (or `Bigger Job: ...`)
+  - Notes (optional additional steps):
     ```
     Step 2: Subsequent action
     Step 3: Following action
     ```
 - **Project**:
-  - Title: `Project: Project Name | Next: Immediate first physical action`
+  - Format: `Project: Project Name | Next: Immediate first physical action`
   - Notes:
     ```
     Where holding: Context or initial status
@@ -88,10 +93,10 @@ When creating tasks in Google Tasks via voice, Gemini, or chat:
     Step 3: Third planned action
     ```
 - **Habit**:
-  - Title: `Habit: Habit Name`
+  - Format: `Habit: Habit Name`
 
 ## How to Apply User Requests
-When the user gives natural language input (e.g. "Add a 5m job to call Sam", "Mark morning push-ups done", "Update Sphere It: printed ring, next step test fit"):
+When the user gives natural language input (e.g. "Add a 5m task to call Sam", "Mark morning push-ups done", "Update Sphere It: printed ring, next step test fit"):
 1. Parse the input into the corresponding bucket(s).
 2. Read and atomically update `DEFAULT_INITIAL_DATA` in `src/services/storageService.ts`.
 3. Confirm the update back to the user with a concise, encouraging checkmark confirmation.

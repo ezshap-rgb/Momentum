@@ -296,32 +296,59 @@ export async function ensureGoogleTaskLists(accessToken: string): Promise<Dedica
     throw new Error(`Failed to create list "${title}" (${res.status}): ${errText}`);
   };
 
-  const getOrCreateDedicatedList = async (pattern: RegExp, defaultTitle: string): Promise<string> => {
+  const renameListIfLegacy = async (listId: string, currentTitle: string, newTitle: string): Promise<void> => {
+    if (currentTitle.trim().toLowerCase() === newTitle.trim().toLowerCase()) return;
+    try {
+      const listPath = formatListIdForUrl(listId);
+      await fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${listPath}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: listId, title: newTitle }),
+      });
+    } catch (e) {
+      console.warn(`Could not rename list ${listId} to ${newTitle}:`, e);
+    }
+  };
+
+  const getOrCreateDedicatedList = async (pattern: RegExp, preferredTitle: string): Promise<string> => {
     // If only 1 list exists in account, we must create dedicated lists
     const existing = existingLists.find(
       (l) => pattern.test(l.title) && (existingLists.length === 1 ? false : l.id !== defaultListId)
     );
     if (existing && existing.id) {
+      // Auto-modernize legacy list names in Google Tasks (Quick Jobs -> Tasks, Responsibilities -> Jobs)
+      if (
+        (preferredTitle === 'Tasks' && /quick/i.test(existing.title)) ||
+        (preferredTitle === 'Jobs' && /resp|bigger/i.test(existing.title))
+      ) {
+        renameListIfLegacy(existing.id, existing.title, preferredTitle);
+        existing.title = preferredTitle;
+      }
       return existing.id;
     }
     try {
-      const created = await createList(defaultTitle);
+      const created = await createList(preferredTitle);
       existingLists.push(created);
       return created.id;
     } catch (e) {
-      console.warn(`Could not create dedicated Google Task list "${defaultTitle}":`, e);
+      console.warn(`Could not create dedicated Google Task list "${preferredTitle}":`, e);
       return defaultListId;
     }
   };
 
-  const quickJobsListId = await getOrCreateDedicatedList(/quick|quick\s*jobs|quick\s*tasks/i, 'Quick Jobs');
-  const responsibilitiesListId = await getOrCreateDedicatedList(/resp|bigger/i, 'Responsibilities');
+  const tasksListId = await getOrCreateDedicatedList(/^(?:tasks?|quick\s*tasks?|quick\s*jobs?)$/i, 'Tasks');
+  const jobsListId = await getOrCreateDedicatedList(/^(?:jobs?|responsibilit(?:y|ies)|bigger\s*jobs?)$/i, 'Jobs');
   const projectsListId = await getOrCreateDedicatedList(/project/i, 'Projects');
   const habitsListId = await getOrCreateDedicatedList(/habit/i, 'Habits');
 
   return {
-    quickJobsListId,
-    responsibilitiesListId,
+    tasksListId,
+    jobsListId,
+    quickJobsListId: tasksListId,
+    responsibilitiesListId: jobsListId,
     projectsListId,
     habitsListId,
   };
@@ -580,28 +607,35 @@ export function syncTasksIntoBoard(
       const taskMatch = rawTitle.match(/^task(?::|\s+-|\s+)\s*(.+)$/i);
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
 
-      // 1. QUICK TASKS (Explicitly Tagged "Task: ...", or [1m], [5m], [15m])
-      if (taskMatch || quickMatch) {
+      // 1. TASKS (Explicitly Tagged "Task: ...", or [1m], [5m], [15m] anywhere)
+      const timingRegex = /\[(1m|5m|15m)\]/i;
+      const hasTimingTag = timingRegex.test(rawTitle);
+
+      if (taskMatch || quickMatch || hasTimingTag) {
         let cleanTitle = taskMatch ? taskMatch[1].trim() : (quickMatch ? quickMatch[2].trim() : rawTitle);
         let duration: QuickJobDuration = '5m';
 
-        // Check if duration was specified like [1m], [5m], [15m] inside the job text
-        const innerDurMatch = cleanTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
-        if (innerDurMatch) {
-          duration = innerDurMatch[1].toLowerCase() as QuickJobDuration;
-          cleanTitle = innerDurMatch[2].trim();
+        // Check if duration was specified like [1m], [5m], [15m] at the end, beginning, or inside
+        const durMatch = cleanTitle.match(timingRegex);
+        if (durMatch) {
+          duration = durMatch[1].toLowerCase() as QuickJobDuration;
+          cleanTitle = cleanTitle.replace(timingRegex, '').trim();
         } else if (quickMatch) {
           duration = quickMatch[1].toLowerCase() as QuickJobDuration;
         }
 
+        // Clean any leading "Task: " or "Task " if present
+        cleanTitle = cleanTitle.replace(/^task(?::|\s+-|\s+)\s*/i, '').trim();
+
         // Relocate if sitting in main list or another list
-        if (dedicatedLists?.quickJobsListId && listId !== dedicatedLists.quickJobsListId) {
+        const targetTasksListId = dedicatedLists?.tasksListId || dedicatedLists?.quickJobsListId;
+        if (targetTasksListId && listId !== targetTasksListId) {
           tasksToRelocate.push({
             sourceListId: listId,
-            targetListId: dedicatedLists.quickJobsListId,
+            targetListId: targetTasksListId,
             task,
             momentumType: 'quick',
-            title: `Task: [${duration}] ${cleanTitle}`,
+            title: `Task: ${cleanTitle} [${duration}]`,
             notes: task.notes,
           });
         }
@@ -643,10 +677,11 @@ export function syncTasksIntoBoard(
         }
 
         // Relocate if sitting in main list or another list
-        if (dedicatedLists?.responsibilitiesListId && listId !== dedicatedLists.responsibilitiesListId) {
+        const targetJobsListId = dedicatedLists?.jobsListId || dedicatedLists?.responsibilitiesListId;
+        if (targetJobsListId && listId !== targetJobsListId) {
           tasksToRelocate.push({
             sourceListId: listId,
-            targetListId: dedicatedLists.responsibilitiesListId,
+            targetListId: targetJobsListId,
             task,
             momentumType: 'resp',
             title: `Job: ${respTitle}${nextStep ? ` -> ${nextStep}` : ''}`,
@@ -822,16 +857,23 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 5. UNTAGGED REGULAR TASK: Route to Quick Jobs (5m default) so ADHD user never loses a task
-      const cleanGenericTitle = rawTitle;
+      // 5. UNTAGGED REGULAR TASK: Route to Tasks (5m default) so ADHD user never loses a task
+      let cleanGenericTitle = rawTitle;
+      let genericDuration: QuickJobDuration = '5m';
+      const genericDurMatch = cleanGenericTitle.match(timingRegex);
+      if (genericDurMatch) {
+        genericDuration = genericDurMatch[1].toLowerCase() as QuickJobDuration;
+        cleanGenericTitle = cleanGenericTitle.replace(timingRegex, '').trim();
+      }
 
-      if (dedicatedLists?.quickJobsListId && listId !== dedicatedLists.quickJobsListId) {
+      const targetTasksListId = dedicatedLists?.tasksListId || dedicatedLists?.quickJobsListId;
+      if (targetTasksListId && listId !== targetTasksListId) {
         tasksToRelocate.push({
           sourceListId: listId,
-          targetListId: dedicatedLists.quickJobsListId,
+          targetListId: targetTasksListId,
           task,
           momentumType: 'quick',
-          title: `Task: [5m] ${cleanGenericTitle}`,
+          title: `Task: ${cleanGenericTitle} [${genericDuration}]`,
           notes: task.notes,
         });
       }
@@ -1052,30 +1094,33 @@ export async function pushLocalTasksToGoogle(
           habitsListId: typeof targetLists === 'string' && targetLists ? targetLists : '@default',
         };
 
-  // 1. Quick Jobs -> quickJobsListId
+  const tasksListId = listConfig.tasksListId || listConfig.quickJobsListId;
+  const jobsListId = listConfig.jobsListId || listConfig.responsibilitiesListId;
+
+  // 1. Tasks -> tasksListId
   for (let i = 0; i < updatedQuickJobs.length; i++) {
     const job = updatedQuickJobs[i];
     if (!job.googleTaskId && !job.done) {
       if (job.id === 'qj-1' || job.id === 'qj-2') continue;
       try {
-        const title = `Task: [${job.duration || '5m'}] ${job.title}`;
-        const taskId = await createGoogleTask(accessToken, listConfig.quickJobsListId, title);
+        const title = `Task: ${job.title} [${job.duration || '5m'}]`;
+        const taskId = await createGoogleTask(accessToken, tasksListId, title);
         if (taskId) {
           updatedQuickJobs[i] = {
             ...job,
             googleTaskId: taskId,
-            googleTaskListId: listConfig.quickJobsListId,
+            googleTaskListId: tasksListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
-        errors.push(`Quick Job "${job.title}": ${err?.message || err}`);
+        errors.push(`Task "${job.title}": ${err?.message || err}`);
       }
     }
   }
 
-  // 2. Responsibilities -> responsibilitiesListId
+  // 2. Jobs -> jobsListId
   for (let i = 0; i < updatedResponsibilities.length; i++) {
     const resp = updatedResponsibilities[i];
     if (!resp.googleTaskId && resp.status === 'active') {
@@ -1088,18 +1133,18 @@ export async function pushLocalTasksToGoogle(
           ? remainingSteps.map((s, idx) => `Step ${idx + 2}: ${s}`).join('\n')
           : undefined;
 
-        const taskId = await createGoogleTask(accessToken, listConfig.responsibilitiesListId, title, notes);
+        const taskId = await createGoogleTask(accessToken, jobsListId, title, notes);
         if (taskId) {
           updatedResponsibilities[i] = {
             ...resp,
             googleTaskId: taskId,
-            googleTaskListId: listConfig.responsibilitiesListId,
+            googleTaskListId: jobsListId,
           };
           pushedTaskIds.push(taskId);
           pushedCount++;
         }
       } catch (err: any) {
-        errors.push(`Responsibility "${resp.title}": ${err?.message || err}`);
+        errors.push(`Job "${resp.title}": ${err?.message || err}`);
       }
     }
   }

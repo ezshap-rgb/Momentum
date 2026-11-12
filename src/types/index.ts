@@ -97,8 +97,10 @@ export interface FirebaseConfigSettings {
 }
 
 export interface DedicatedTaskLists {
-  quickJobsListId: string;
-  responsibilitiesListId: string;
+  tasksListId?: string; // Dedicated list ID for Tasks (formerly Quick Jobs)
+  jobsListId?: string;  // Dedicated list ID for Jobs (formerly Responsibilities)
+  quickJobsListId: string; // Backward compatibility alias
+  responsibilitiesListId: string; // Backward compatibility alias
   projectsListId: string;
   habitsListId: string;
 }
