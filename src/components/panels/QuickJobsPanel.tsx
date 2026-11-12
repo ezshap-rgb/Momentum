@@ -288,9 +288,25 @@ export const QuickJobsPanel: React.FC = () => {
                           </button>
                         </div>
                       </div>
+
+                      {/* Safe Delete inside edit mode only */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteQuickJob(job.id);
+                            cancelEdit();
+                          }}
+                          className="px-2 py-1 text-[11px] text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition flex items-center gap-1 font-medium"
+                          title="Delete task"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete Task</span>
+                        </button>
+                      </div>
                     </form>
                   ) : (
-                    /* Display Mode: Click to view whole entry (no cutoff) and edit */
+                    /* Display Mode: Click to view whole entry (no cutoff); ONLY circle marks done */
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2 min-w-0 flex-1">
                         <button
@@ -299,10 +315,10 @@ export const QuickJobsPanel: React.FC = () => {
                             e.stopPropagation();
                             toggleQuickJob(job.id);
                           }}
-                          className="mt-0.5 text-slate-400 hover:text-emerald-500 transition shrink-0"
+                          className="mt-0.5 p-1 -m-1 text-slate-400 hover:text-emerald-500 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition shrink-0"
                           title="Mark done"
                         >
-                          <Circle className="w-3.5 h-3.5" />
+                          <Circle className="w-4 h-4" />
                         </button>
                         <span
                           className={`text-xs font-medium text-slate-800 dark:text-slate-100 ${
@@ -318,18 +334,10 @@ export const QuickJobsPanel: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => startEditing(job)}
-                          className="p-1 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition"
                           title="Edit task"
                         >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteQuickJob(job.id)}
-                          className="p-1 text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3 h-3" />
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

@@ -13,6 +13,7 @@ import {
   Columns,
   RefreshCw,
   CheckCircle2,
+  Undo2,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -31,6 +32,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
     toggleLayoutMode,
     isSyncingTasks,
     syncGoogleTasks,
+    undo,
+    canUndo,
+    lastUndoMessage,
   } = useMomentum();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -159,6 +163,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
                 ? 'Sync Tasks'
                 : 'Connect Tasks'}
             </span>
+          </button>
+
+          {/* Global Undo Button */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition ${
+              canUndo
+                ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-xs cursor-pointer active:scale-95'
+                : 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800/80 text-slate-400 border-slate-200 dark:border-slate-800'
+            }`}
+            title={canUndo ? `Undo: ${lastUndoMessage || 'last action'} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)'}
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Undo</span>
           </button>
 
           {/* Quick Voice Ingest Pill */}

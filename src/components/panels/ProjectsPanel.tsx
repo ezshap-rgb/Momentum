@@ -280,22 +280,36 @@ export const ProjectsPanel: React.FC = () => {
                           />
                         </div>
                       </div>
-                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                         <button
                           type="button"
-                          onClick={cancelEdit}
-                          className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
+                          onClick={() => {
+                            deleteProject(project.id);
+                            cancelEdit();
+                          }}
+                          className="px-2 py-1 text-[11px] text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition flex items-center gap-1 font-medium"
+                          title="Delete project"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete Project</span>
                         </button>
-                        <button
-                          type="submit"
-                          disabled={!editName.trim()}
-                          className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Save</span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!editName.trim()}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Save</span>
+                          </button>
+                        </div>
                       </div>
                     </form>
                   ) : (
@@ -350,13 +364,6 @@ export const ProjectsPanel: React.FC = () => {
                             title="Open Where Was I? inspector"
                           >
                             Where Was I?
-                          </button>
-                          <button
-                            onClick={() => deleteProject(project.id)}
-                            className="p-1 text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
-                            title="Delete project"
-                          >
-                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>

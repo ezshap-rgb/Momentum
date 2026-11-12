@@ -8,14 +8,14 @@ import { ProjectsPanel } from './components/panels/ProjectsPanel';
 import { CalendarPanel } from './components/CalendarPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { VoiceIngestionModal } from './components/VoiceIngestionModal';
-import { Zap, Activity, Layers, Compass, Mic } from 'lucide-react';
+import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 
 function CockpitDashboard() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [mobileTab, setMobileTab] = useState<'quick' | 'habits' | 'bigger' | 'projects'>('quick');
-  const { panelStates, boardData, layoutMode } = useMomentum();
+  const { panelStates, boardData, layoutMode, undo, lastUndoMessage, dismissUndoMessage } = useMomentum();
 
   const showCalendar = panelStates.calendar !== 'hidden';
 
@@ -225,6 +225,29 @@ function CockpitDashboard() {
           <span className="text-[10px]">Projects</span>
         </button>
       </nav>
+
+      {/* Floating Undo Toast Notification */}
+      {lastUndoMessage && (
+        <div className="fixed bottom-16 md:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2 rounded-2xl bg-slate-900/95 dark:bg-slate-100/95 text-white dark:text-slate-900 shadow-2xl backdrop-blur-md border border-slate-700/60 dark:border-slate-300 animate-slideUp text-xs font-semibold max-w-[92vw]">
+          <span className="truncate max-w-[200px] sm:max-w-md">{lastUndoMessage}</span>
+          <button
+            type="button"
+            onClick={undo}
+            className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 shrink-0"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            <span>Undo</span>
+          </button>
+          <button
+            type="button"
+            onClick={dismissUndoMessage}
+            className="p-1 text-slate-400 hover:text-white dark:hover:text-slate-900 transition shrink-0"
+            title="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Modals */}
       {isVoiceOpen && (

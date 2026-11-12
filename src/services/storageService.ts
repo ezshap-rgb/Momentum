@@ -210,6 +210,19 @@ export function recordDeletedGoogleTaskId(taskId: string): void {
   }
 }
 
+export function unrecordDeletedGoogleTaskId(taskId: string): void {
+  if (!taskId || taskId.includes(' ')) return;
+  try {
+    const existing = getDeletedGoogleTaskIds();
+    if (existing.has(taskId)) {
+      existing.delete(taskId);
+      localStorage.setItem(DELETED_GTASKS_KEY, JSON.stringify(Array.from(existing)));
+    }
+  } catch (e) {
+    console.error('Failed to unrecord deleted Google Task ID:', e);
+  }
+}
+
 export function loadLocalBoardData(): MomentumBoardData {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_DATA_KEY);

@@ -25,6 +25,7 @@ import {
   subscribeToBoardData,
   persistBoardData,
   recordDeletedGoogleTaskId,
+  unrecordDeletedGoogleTaskId,
   DEFAULT_INITIAL_DATA,
   DEFAULT_SETTINGS,
 } from '../services/storageService';
@@ -150,6 +151,11 @@ interface MomentumContextType {
   deleteCalendarEvent: (id: string) => void;
   // Universal AI ingestion
   applyGeminiParsedData: (data: GeminiParsedData) => void;
+  // Undo System
+  undo: () => void;
+  canUndo: boolean;
+  lastUndoMessage: string | null;
+  dismissUndoMessage: () => void;
 }
 
 const MomentumContext = createContext<MomentumContextType | undefined>(undefined);
@@ -198,16 +204,86 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsubscribe();
   }, [settings.useCloudSync, settings.firebaseConfig, settings.userBoardId]);
 
+  // Undo Stack (keeps last 30 snapshots)
+  const [undoStack, setUndoStack] = useState<{ data: MomentumBoardData; actionName?: string }[]>([]);
+  const [lastUndoMessage, setLastUndoMessage] = useState<string | null>(null);
+
+  const dismissUndoMessage = useCallback(() => {
+    setLastUndoMessage(null);
+  }, []);
+
+  // Auto-dismiss undo message after 7 seconds
+  useEffect(() => {
+    if (lastUndoMessage) {
+      const timer = setTimeout(() => {
+        setLastUndoMessage(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastUndoMessage]);
+
   const updateBoard = useCallback(
-    (updater: (prev: MomentumBoardData) => MomentumBoardData) => {
+    (updater: (prev: MomentumBoardData) => MomentumBoardData, actionName?: string) => {
       setBoardData((prev) => {
         const next = updater(prev);
+        if (next !== prev) {
+          setUndoStack((stack) => [...stack.slice(-30), { data: prev, actionName }]);
+          if (actionName) {
+            setLastUndoMessage(actionName);
+          }
+        }
         persistBoardData(next, settings);
         return next;
       });
     },
     [settings]
   );
+
+  const undo = useCallback(() => {
+    setUndoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const last = stack[stack.length - 1];
+      const newStack = stack.slice(0, -1);
+
+      // Restore previous board data
+      setBoardData(last.data);
+      persistBoardData(last.data, settings);
+
+      // Unrecord deleted google task IDs so restored items stay synced
+      for (const job of last.data.quick_jobs) {
+        if (job.googleTaskId) unrecordDeletedGoogleTaskId(job.googleTaskId);
+      }
+      for (const resp of last.data.responsibilities) {
+        if (resp.googleTaskId) unrecordDeletedGoogleTaskId(resp.googleTaskId);
+      }
+      for (const proj of last.data.projects) {
+        if (proj.googleTaskId) unrecordDeletedGoogleTaskId(proj.googleTaskId);
+      }
+      for (const hab of last.data.habits) {
+        if (hab.googleTaskId) unrecordDeletedGoogleTaskId(hab.googleTaskId);
+      }
+
+      soundService.playSuccessChime();
+      setLastUndoMessage(last.actionName ? `Recovered: ${last.actionName}` : 'Recovered previous state');
+      return newStack;
+    });
+  }, [settings]);
+
+  // Global Ctrl+Z / Cmd+Z shortcut (unless focused inside a text input/textarea)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        if (!isInput) {
+          e.preventDefault();
+          undo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo]);
 
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettings((prev) => {
@@ -323,9 +399,16 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const toggleQuickJob = useCallback(
     (id: string) => {
+      let actionDesc = '';
       updateBoard((prev) => {
         const target = prev.quick_jobs.find((j) => j.id === id);
         const willBeDone = target ? !target.done : false;
+        actionDesc = target
+          ? willBeDone
+            ? `Task "${target.title}" completed`
+            : `Task "${target.title}" reopened`
+          : 'Task updated';
+
         if (target && willBeDone) {
           soundService.playSuccessChime();
           if (target.googleTaskId) {
@@ -346,15 +429,17 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             j.id === id ? { ...j, done: willBeDone } : j
           ),
         };
-      });
+      }, actionDesc || 'Task updated');
     },
     [updateBoard, settings.googleTasksWebhookUrl]
   );
 
   const deleteQuickJob = useCallback(
     (id: string) => {
+      let taskTitle = '';
       updateBoard((prev) => {
         const target = prev.quick_jobs.find((j) => j.id === id);
+        taskTitle = target ? target.title : 'Task';
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
@@ -372,7 +457,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ...prev,
           quick_jobs: prev.quick_jobs.filter((j) => j.id !== id),
         };
-      });
+      }, `Task "${taskTitle || 'Task'}" deleted`);
     },
     [updateBoard, settings.googleTasksWebhookUrl]
   );
@@ -584,8 +669,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteResponsibility = useCallback(
     (id: string) => {
+      let respTitle = '';
       updateBoard((prev) => {
         const target = prev.responsibilities.find((r) => r.id === id);
+        respTitle = target ? target.title : 'Job';
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
@@ -603,7 +690,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ...prev,
           responsibilities: prev.responsibilities.filter((r) => r.id !== id),
         };
-      });
+      }, `Job "${respTitle || 'Job'}" deleted`);
     },
     [updateBoard, settings.googleTasksWebhookUrl]
   );
@@ -756,8 +843,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteProject = useCallback(
     (id: string) => {
+      let projName = '';
       updateBoard((prev) => {
         const target = prev.projects.find((p) => p.id === id);
+        projName = target ? target.name : 'Project';
         if (target) {
           if (target.googleTaskId) {
             recordDeletedGoogleTaskId(target.googleTaskId);
@@ -777,7 +866,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           current_focus_project_id:
             prev.current_focus_project_id === id ? null : prev.current_focus_project_id,
         };
-      });
+      }, `Project "${projName || 'Project'}" deleted`);
     },
     [updateBoard, settings.googleTasksWebhookUrl]
   );
@@ -915,10 +1004,15 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteHabit = useCallback(
     (id: string) => {
-      updateBoard((prev) => ({
-        ...prev,
-        habits: prev.habits.filter((h) => h.id !== id),
-      }));
+      let habitName = '';
+      updateBoard((prev) => {
+        const target = prev.habits.find((h) => h.id === id);
+        habitName = target ? target.name : 'Habit';
+        return {
+          ...prev,
+          habits: prev.habits.filter((h) => h.id !== id),
+        };
+      }, `Habit "${habitName || 'Habit'}" deleted`);
     },
     [updateBoard]
   );
@@ -1426,6 +1520,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addCalendarEvent,
         deleteCalendarEvent,
         applyGeminiParsedData,
+        undo,
+        canUndo: undoStack.length > 0,
+        lastUndoMessage,
+        dismissUndoMessage,
       }}
     >
       {children}
