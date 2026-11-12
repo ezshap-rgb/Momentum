@@ -19,14 +19,18 @@ When this file is modified, Vite's Hot Module Replacement (HMR) automatically pu
 ## The 4 Core Activity Types
 
 ### 1. Tasks (`quick_jobs`)
-Bite-sized, 1-sitting tasks with clear speed markings placed at the **END** of the entry:
+Bite-sized, 1-sitting actions that can be done **right now** in any spare 1m, 5m, or 15m pocket:
+- No scheduled time needed; zero cognitive setup barrier.
 - Duration: `'1m' | '5m' | '15m'` (default `5m`)
 - Google Tasks title format: `Task: Call dentist [5m]` (Timing label placed at the end so it does not clutter mobile widgets and notification previews).
 - Schema: `{ id: string, title: string, duration: '1m' | '5m' | '15m', done: boolean, createdAt: number }`
 
 ### 2. Jobs (`responsibilities`)
-Multi-step commitments where only the single immediate next action is shown on the dashboard:
-- Google Tasks title format: `Job: Title -> Step 1 action`
+Commitments that require cognitive setup and **scheduled time** (either a specific date/time, or a **weekly recurring appointment** that resets every week):
+- Google Tasks title format:
+  - Scheduled one-time: `Job: File taxes [2026-11-20 15:00] -> Gather receipts`
+  - Weekly recurring: `Job: Prepare Mussar Seder [Weekly Tuesday 2:00 PM] -> Review text`
+- **Weekly Auto-Reset**: When the user completes the final step of a weekly recurring job (or taps Done), Momentum celebrates completion, automatically schedules it for next week (+7 days), and resets the steps back to Step 1 (`current_step_index: 0`).
 - Schema:
   ```ts
   {
@@ -34,7 +38,11 @@ Multi-step commitments where only the single immediate next action is shown on t
     title: string,
     steps: string[],
     current_step_index: number,
-    due: string | null, // e.g. "Tuesday 2:00 PM"
+    due: string | null, // e.g. "🔁 Tuesday 2:00 PM (Resets weekly)"
+    scheduledDate?: string | null, // e.g. "2026-11-17"
+    scheduledTime?: string | null, // e.g. "14:00"
+    recurrence?: 'none' | 'weekly' | 'biweekly' | 'monthly' | null,
+    recurrenceDay?: string | null, // e.g. "Tuesday"
     status: 'active' | 'waiting' | 'paused' | 'done',
     createdAt: number
   }

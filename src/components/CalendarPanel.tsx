@@ -100,9 +100,6 @@ export const CalendarPanel: React.FC = () => {
     setIsAddingEvent(false);
   };
 
-  // Combine calendar_events with responsibilities that have a due date
-  const events = boardData.calendar_events || [];
-
   // Helper to format date strings
   const getDaysInMonth = (year: number, month: number) => {
     return new Date(year, month + 1, 0).getDate();
@@ -127,6 +124,42 @@ export const CalendarPanel: React.FC = () => {
     }
     return week;
   };
+
+  // Combine calendar_events with responsibilities (jobs) that have a scheduled date or weekly recurrence
+  const calendarEvents = boardData.calendar_events || [];
+  const scheduledJobEvents = (boardData.responsibilities || [])
+    .filter((r) => r.status === 'active' && (r.scheduledDate || r.recurrence === 'weekly'))
+    .flatMap((r) => {
+      if (r.recurrence === 'weekly' && r.recurrenceDay) {
+        const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const targetDayIdx = daysOfWeek.findIndex((d) => d === r.recurrenceDay?.toLowerCase());
+        if (targetDayIdx !== -1) {
+          const week = getWeekDates(currentDate);
+          const matchingDate = week.find((d) => d.getDay() === targetDayIdx);
+          if (matchingDate) {
+            return [{
+              id: `job-rec-${r.id}`,
+              title: `💼 ${r.title}`,
+              date: matchingDate.toISOString().split('T')[0],
+              time: r.scheduledTime || null,
+              category: 'job' as const,
+            }];
+          }
+        }
+      }
+      if (r.scheduledDate) {
+        return [{
+          id: `job-sched-${r.id}`,
+          title: `💼 ${r.title}`,
+          date: r.scheduledDate,
+          time: r.scheduledTime || null,
+          category: 'job' as const,
+        }];
+      }
+      return [];
+    });
+
+  const events = [...calendarEvents, ...scheduledJobEvents];
 
   const weekDays = getWeekDates(currentDate);
   const todayStr = new Date().toISOString().split('T')[0];
@@ -468,21 +501,30 @@ export const CalendarPanel: React.FC = () => {
 
                 {/* Day's Events */}
                 <div className="space-y-1 mt-1 text-left overflow-y-auto max-h-14">
-                  {dayEvents.map((evt) => (
-                    <div
-                      key={evt.id}
-                      className="group/evt text-[10px] leading-tight px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 border border-blue-300 dark:border-blue-700/60 text-blue-800 dark:text-blue-200 truncate flex items-center justify-between"
-                      title={`${evt.title} ${evt.time ? `(${evt.time})` : ''}`}
-                    >
-                      <span className="truncate">{evt.title}</span>
-                      <button
-                        onClick={() => deleteCalendarEvent(evt.id)}
-                        className="opacity-0 group-hover/evt:opacity-100 hover:text-rose-400 ml-1"
+                  {dayEvents.map((evt) => {
+                    const isJob = evt.category === 'job' || evt.id.startsWith('job-');
+                    return (
+                      <div
+                        key={evt.id}
+                        className={`group/evt text-[10px] leading-tight px-1 py-0.5 rounded border truncate flex items-center justify-between ${
+                          isJob
+                            ? 'bg-purple-100 dark:bg-purple-950/80 border-purple-300 dark:border-purple-800/80 text-purple-900 dark:text-purple-200 font-medium'
+                            : 'bg-blue-100 dark:bg-blue-900/60 border-blue-300 dark:border-blue-700/60 text-blue-800 dark:text-blue-200'
+                        }`}
+                        title={`${evt.title} ${evt.time ? `(${evt.time})` : ''}`}
                       >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <span className="truncate">{evt.title}</span>
+                        {!isJob && (
+                          <button
+                            onClick={() => deleteCalendarEvent(evt.id)}
+                            className="opacity-0 group-hover/evt:opacity-100 hover:text-rose-400 ml-1"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                   {dayEvents.length === 0 && (
                     <span className="text-[9px] text-slate-400 dark:text-slate-600 block text-center italic">
                       —

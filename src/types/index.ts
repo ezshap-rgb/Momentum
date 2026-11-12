@@ -12,6 +12,7 @@ export interface QuickJob {
 }
 
 export type ResponsibilityStatus = 'active' | 'waiting' | 'paused' | 'done';
+export type JobRecurrence = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
 
 export interface Responsibility {
   id: string;
@@ -19,6 +20,11 @@ export interface Responsibility {
   steps: string[];
   current_step_index: number;
   due?: string | null;
+  scheduledDate?: string | null; // e.g. "2026-11-17"
+  scheduledTime?: string | null; // e.g. "14:00"
+  recurrence?: JobRecurrence | null;
+  recurrenceDay?: string | null; // e.g. "Tuesday"
+  lastCompletedAt?: number | null;
   status: ResponsibilityStatus;
   createdAt: number;
   googleTaskId?: string;

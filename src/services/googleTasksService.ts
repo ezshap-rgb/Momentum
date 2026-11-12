@@ -1,4 +1,4 @@
-import { MomentumBoardData, QuickJob, Responsibility, Project, Habit, QuickJobDuration, DedicatedTaskLists } from '../types';
+import { MomentumBoardData, QuickJob, Responsibility, JobRecurrence, Project, Habit, QuickJobDuration, DedicatedTaskLists } from '../types';
 import { getDeletedGoogleTaskIds } from './storageService';
 
 declare global {
@@ -676,6 +676,23 @@ export function syncTasksIntoBoard(
           nextStep = parts.slice(1).join('->').trim();
         }
 
+        // Check for recurrence and scheduling tags like [Weekly Tuesday 2:00 PM] or [Weekly Friday 10:00]
+        let recurrence: JobRecurrence | null = null;
+        let recurrenceDay: string | null = null;
+        let scheduledTime: string | null = null;
+        let scheduledDate: string | null = task.due ? task.due.split('T')[0] : null;
+
+        const recMatch = respTitle.match(/\[(?:(weekly|daily|biweekly|monthly)\s*)?(?:(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*)?(?:(\d{1,2}:\d{2}(?:\s*[ap]m)?))?\]/i);
+        if (recMatch && (recMatch[1] || recMatch[2] || recMatch[3])) {
+          if (recMatch[1]) recurrence = recMatch[1].toLowerCase() as JobRecurrence;
+          if (recMatch[2]) {
+            recurrenceDay = recMatch[2].charAt(0).toUpperCase() + recMatch[2].slice(1).toLowerCase();
+            if (!recurrence) recurrence = 'weekly';
+          }
+          if (recMatch[3]) scheduledTime = recMatch[3];
+          respTitle = respTitle.replace(recMatch[0], '').trim();
+        }
+
         // Relocate if sitting in main list or another list
         const targetJobsListId = dedicatedLists?.jobsListId || dedicatedLists?.responsibilitiesListId;
         if (targetJobsListId && listId !== targetJobsListId) {
@@ -707,6 +724,10 @@ export function syncTasksIntoBoard(
 
         const key = taskId || respTitle.toLowerCase();
         if (!existingRespKeys.has(key)) {
+          const computedDue = recurrence
+            ? `🔁 ${recurrenceDay || 'Weekly'}${scheduledTime ? ` ${scheduledTime}` : ''} (Resets weekly)`
+            : task.due ? task.due.split('T')[0] : null;
+
           responsibilities.unshift({
             id: `gt-resp-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             title: respTitle,
@@ -716,7 +737,11 @@ export function syncTasksIntoBoard(
             createdAt: Date.now(),
             googleTaskId: taskId,
             googleTaskListId: listId,
-            due: task.due ? task.due.split('T')[0] : null,
+            due: computedDue,
+            scheduledDate,
+            scheduledTime,
+            recurrence,
+            recurrenceDay,
           });
           existingRespKeys.add(key);
           addedResponsibilities++;

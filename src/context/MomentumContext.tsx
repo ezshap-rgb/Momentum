@@ -5,6 +5,7 @@ import {
   QuickJob,
   QuickJobDuration,
   Responsibility,
+  JobRecurrence,
   Project,
   Habit,
   CalendarEvent,
@@ -80,9 +81,18 @@ interface MomentumContextType {
   deleteQuickJob: (id: string) => void;
   editQuickJob: (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => void;
   // Responsibilities (Jobs)
-  addResponsibility: (title: string, initialNextStep: string, due?: string | null) => void;
+  addResponsibility: (
+    title: string,
+    initialNextStep: string,
+    due?: string | null,
+    scheduledDate?: string | null,
+    scheduledTime?: string | null,
+    recurrence?: JobRecurrence | null,
+    recurrenceDay?: string | null
+  ) => void;
   advanceResponsibilityStep: (id: string) => void;
   regressResponsibilityStep: (id: string) => void;
+  resetResponsibilitySteps: (id: string) => void;
   addStepToResponsibility: (id: string, stepText: string) => void;
   updateResponsibilityDue: (id: string, due: string | null) => void;
   setResponsibilityStatus: (id: string, status: ResponsibilityStatus) => void;
@@ -93,6 +103,10 @@ interface MomentumContextType {
       title?: string;
       currentStep?: string;
       due?: string | null;
+      scheduledDate?: string | null;
+      scheduledTime?: string | null;
+      recurrence?: JobRecurrence | null;
+      recurrenceDay?: string | null;
       steps?: string[];
     }
   ) => void;
@@ -365,14 +379,37 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Responsibilities
   const addResponsibility = useCallback(
-    (title: string, initialNextStep: string, due?: string | null) => {
+    (
+      title: string,
+      initialNextStep: string,
+      due?: string | null,
+      scheduledDate?: string | null,
+      scheduledTime?: string | null,
+      recurrence?: JobRecurrence | null,
+      recurrenceDay?: string | null
+    ) => {
       if (!title.trim()) return;
+      let computedDue = due || null;
+      if (!computedDue && (scheduledDate || scheduledTime || recurrence)) {
+        const timePart = scheduledTime ? ` ${scheduledTime}` : '';
+        if (recurrence && recurrence !== 'none') {
+          const dayPart = recurrenceDay ? `${recurrenceDay}` : 'Weekly';
+          computedDue = `🔁 ${dayPart}${timePart}`;
+        } else if (scheduledDate) {
+          computedDue = `${scheduledDate}${timePart}`;
+        }
+      }
+
       const newResp: Responsibility = {
         id: `resp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         title: title.trim(),
         steps: initialNextStep.trim() ? [initialNextStep.trim()] : ['First actionable step'],
         current_step_index: 0,
-        due: due || null,
+        due: computedDue,
+        scheduledDate: scheduledDate || null,
+        scheduledTime: scheduledTime || null,
+        recurrence: recurrence || null,
+        recurrenceDay: recurrenceDay || null,
         status: 'active',
         createdAt: Date.now(),
       };
@@ -410,6 +447,42 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (r.id !== id) return r;
           const nextIndex = r.current_step_index + 1;
           const isDone = nextIndex >= r.steps.length;
+
+          // If recurring weekly (or recurring in general), automatically reset steps and advance scheduled date!
+          if (isDone && r.recurrence && r.recurrence !== 'none') {
+            let nextDateStr = r.scheduledDate || null;
+            if (r.scheduledDate) {
+              const d = new Date(r.scheduledDate + 'T00:00:00');
+              const daysToAdd = r.recurrence === 'weekly' ? 7 : r.recurrence === 'biweekly' ? 14 : r.recurrence === 'daily' ? 1 : 30;
+              d.setDate(d.getDate() + daysToAdd);
+              nextDateStr = d.toISOString().split('T')[0];
+            } else if (r.recurrenceDay) {
+              const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              const targetDayIdx = daysOfWeek.findIndex((d) => d.toLowerCase() === r.recurrenceDay?.toLowerCase());
+              if (targetDayIdx !== -1) {
+                const now = new Date();
+                const currentDayIdx = now.getDay();
+                let diff = (targetDayIdx - currentDayIdx + 7) % 7;
+                if (diff === 0) diff = 7;
+                now.setDate(now.getDate() + diff);
+                nextDateStr = now.toISOString().split('T')[0];
+              }
+            }
+
+            const timeStr = r.scheduledTime ? ` ${r.scheduledTime}` : '';
+            const dayStr = r.recurrenceDay ? `${r.recurrenceDay}` : 'Weekly';
+            const updatedDue = `🔁 ${dayStr}${timeStr} (Resets weekly)`;
+
+            return {
+              ...r,
+              current_step_index: 0,
+              status: 'active',
+              scheduledDate: nextDateStr,
+              due: updatedDue,
+              lastCompletedAt: Date.now(),
+            };
+          }
+
           if (isDone && r.googleTaskId) {
             recordDeletedGoogleTaskId(r.googleTaskId);
             if (settings.googleTasksWebhookUrl) {
@@ -442,6 +515,23 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return {
             ...r,
             current_step_index: prevIndex,
+            status: 'active',
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const resetResponsibilitySteps = useCallback(
+    (id: string) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          return {
+            ...r,
+            current_step_index: 0,
             status: 'active',
           };
         }),
@@ -525,6 +615,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         title?: string;
         currentStep?: string;
         due?: string | null;
+        scheduledDate?: string | null;
+        scheduledTime?: string | null;
+        recurrence?: JobRecurrence | null;
+        recurrenceDay?: string | null;
         steps?: string[];
       }
     ) => {
@@ -540,6 +634,10 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ...r,
             title: updates.title !== undefined ? updates.title.trim() : r.title,
             due: updates.due !== undefined ? updates.due : r.due,
+            scheduledDate: updates.scheduledDate !== undefined ? updates.scheduledDate : r.scheduledDate,
+            scheduledTime: updates.scheduledTime !== undefined ? updates.scheduledTime : r.scheduledTime,
+            recurrence: updates.recurrence !== undefined ? updates.recurrence : r.recurrence,
+            recurrenceDay: updates.recurrenceDay !== undefined ? updates.recurrenceDay : r.recurrenceDay,
             steps: newSteps,
           };
         }),
@@ -1307,6 +1405,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addResponsibility,
         advanceResponsibilityStep,
         regressResponsibilityStep,
+        resetResponsibilitySteps,
         addStepToResponsibility,
         updateResponsibilityDue,
         setResponsibilityStatus,
