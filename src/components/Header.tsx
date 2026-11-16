@@ -92,21 +92,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 py-2 transition-colors shrink-0">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
         {/* Brand & Artwork */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <img
             src="./icons/icon-192.png"
             alt="Momentum"
-            className="w-7 h-7 rounded-xl shadow-xs border border-purple-500/30 object-cover"
+            className="w-6 h-6 rounded-lg shadow-xs border border-purple-500/30 object-cover"
           />
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="font-extrabold text-sm text-slate-900 dark:text-slate-100 tracking-tight leading-none">
-                Momentum
-              </h1>
-              <span className="text-[8px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
-                {layoutMode === 'widget' ? 'Widget' : 'Cockpit'}
-              </span>
-            </div>
+          <div className="flex flex-col">
+            <h1 className="font-extrabold text-xs text-slate-900 dark:text-slate-100 tracking-tight leading-none">
+              Momentum
+            </h1>
+            <span className="text-[7px] uppercase font-bold tracking-wider text-purple-600 dark:text-purple-400 leading-tight">
+              {layoutMode === 'widget' ? 'Widget' : 'Cockpit'}
+            </span>
           </div>
         </div>
 

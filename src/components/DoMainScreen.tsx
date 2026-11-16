@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useMomentum } from '../context/MomentumContext';
 import {
   getStoredCredentials,
   saveCredentials,
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export function DoMainScreen({ onOpenTaskView }: Props) {
+  const { settings, toggleTheme } = useMomentum();
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [showConfig, setShowConfig] = useState(false);
@@ -227,22 +229,23 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       <div className="flex items-center justify-between text-[11px] text-slate-500 pb-1 px-1">
         <span>Focus Action Layer</span>
 
-        {/* Discreet Theme Toggle */}
+        {/* Discreet Visual Theme Toggle: Shows current mode for Task View */}
         <button
-          onClick={() => {
-            const html = document.documentElement;
-            if (html.classList.contains('dark')) {
-              html.classList.remove('dark');
-              localStorage.setItem('momentum_theme', 'light');
-            } else {
-              html.classList.add('dark');
-              localStorage.setItem('momentum_theme', 'dark');
-            }
-          }}
-          className="p-1 text-slate-400 hover:text-slate-200 transition"
-          title="Toggle Light/Dark Theme"
+          onClick={toggleTheme}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 transition active:scale-95"
+          title={`Task View Theme: Currently ${settings.theme === 'dark' ? 'Dark' : 'Light'}. Tap to switch.`}
         >
-          <Moon className="w-3.5 h-3.5" />
+          {settings.theme === 'dark' ? (
+            <>
+              <Moon className="w-3.5 h-3.5 text-purple-400" />
+              <span className="text-[10px] text-slate-400 font-medium">Dark</span>
+            </>
+          ) : (
+            <>
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[10px] text-slate-400 font-medium">Light</span>
+            </>
+          )}
         </button>
       </div>
     </div>

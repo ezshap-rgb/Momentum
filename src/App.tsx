@@ -278,13 +278,13 @@ export default function App() {
     localStorage.setItem('focus_current_view', view);
   };
 
-  if (currentView === 'do') {
-    return <DoMainScreen onOpenTaskView={() => setView('tasks')} />;
-  }
-
   return (
     <MomentumProvider>
-      <CockpitDashboard onOpenDoMode={() => setView('do')} />
+      {currentView === 'do' ? (
+        <DoMainScreen onOpenTaskView={() => setView('tasks')} />
+      ) : (
+        <CockpitDashboard onOpenDoMode={() => setView('do')} />
+      )}
     </MomentumProvider>
   );
 }
