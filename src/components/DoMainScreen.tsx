@@ -14,6 +14,8 @@ import {
   Settings,
   LayoutGrid,
   Zap,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 interface Props {
@@ -221,9 +223,27 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         )}
       </div>
 
-      {/* Bottom hint */}
-      <div className="text-center text-[11px] text-slate-500 pb-1">
-        Focus Action Layer · Phase 2: Offline Data Layer
+      {/* Bottom bar */}
+      <div className="flex items-center justify-between text-[11px] text-slate-500 pb-1 px-1">
+        <span>Focus Action Layer</span>
+
+        {/* Discreet Theme Toggle */}
+        <button
+          onClick={() => {
+            const html = document.documentElement;
+            if (html.classList.contains('dark')) {
+              html.classList.remove('dark');
+              localStorage.setItem('momentum_theme', 'light');
+            } else {
+              html.classList.add('dark');
+              localStorage.setItem('momentum_theme', 'dark');
+            }
+          }}
+          className="p-1 text-slate-400 hover:text-slate-200 transition"
+          title="Toggle Light/Dark Theme"
+        >
+          <Moon className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );
