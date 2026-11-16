@@ -29,8 +29,10 @@ export interface FocusEvent {
   schema_version: string;
 }
 
-export async function sendTestEvent(customEventId?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
-  const { url, key } = getStoredCredentials();
+export async function sendTestEvent(customEventId?: string, overrideUrl?: string, overrideKey?: string): Promise<{ ok: boolean; message?: string; event_id?: string; error?: string }> {
+  const creds = getStoredCredentials();
+  const url = (overrideUrl !== undefined ? overrideUrl : creds.url).trim();
+  const key = (overrideKey !== undefined ? overrideKey : creds.key).trim();
 
   if (!url) {
     return { ok: false, error: 'Web App URL is not configured. Please paste your Apps Script URL below.' };
@@ -38,6 +40,9 @@ export async function sendTestEvent(customEventId?: string): Promise<{ ok: boole
   if (!key) {
     return { ok: false, error: 'Secret Key is not configured. Please paste your secret key below.' };
   }
+
+  // Ensure they are saved in storage as well
+  saveCredentials(url, key);
 
   const event: FocusEvent = {
     event_id: customEventId || 'test_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),

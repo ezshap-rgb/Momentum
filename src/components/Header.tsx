@@ -20,9 +20,10 @@ import {
 interface HeaderProps {
   onOpenSettings: () => void;
   onOpenVoiceIngest: () => void;
+  onOpenDoMode?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceIngest }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceIngest, onOpenDoMode }) => {
   const {
     settings,
     toggleTheme,
@@ -265,15 +266,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
             </button>
           )}
 
-          {/* Settings Modal */}
+          {/* DO Button to switch back to Action Layer */}
           <button
             onClick={() => {
-              const url = new URL(window.location.href);
-              url.searchParams.set('mode', 'do');
-              window.location.href = url.toString();
+              if (onOpenDoMode) {
+                onOpenDoMode();
+              } else {
+                const url = new URL(window.location.href);
+                url.searchParams.set('mode', 'do');
+                window.location.href = url.toString();
+              }
             }}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs shadow-purple-600/30 transition"
-            title="Open Focus / DO Action Layer (Phase 1 Test Screen)"
+            title="Open Focus / DO Action Layer"
           >
             <Zap className="w-3.5 h-3.5 fill-current" />
             <span>DO</span>

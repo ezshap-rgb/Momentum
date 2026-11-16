@@ -9,9 +9,10 @@ import { CalendarPanel } from './components/CalendarPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { VoiceIngestionModal } from './components/VoiceIngestionModal';
 import { Phase1TestScreen } from './components/Phase1TestScreen';
+import { DoMainScreen } from './components/DoMainScreen';
 import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 
-function CockpitDashboard() {
+function CockpitDashboard({ onOpenDoMode }: { onOpenDoMode?: () => void }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -82,6 +83,7 @@ function CockpitDashboard() {
       <Header
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenVoiceIngest={() => setIsVoiceOpen(true)}
+        onOpenDoMode={onOpenDoMode}
       />
 
       {/* Main Cockpit: Zero window scrolling, strictly locked to viewport */}
@@ -267,15 +269,22 @@ function CockpitDashboard() {
 
 export default function App() {
   const urlParams = new URLSearchParams(window.location.search);
-  const [mode, setMode] = useState<string | null>(urlParams.get('mode'));
+  // Default is 'do' mode as requested! Task view is available via toggle.
+  const initialMode = urlParams.get('mode') || localStorage.getItem('focus_current_view') || 'do';
+  const [currentView, setCurrentView] = useState<'do' | 'tasks'>(initialMode === 'tasks' ? 'tasks' : 'do');
 
-  if (mode === 'do' || mode === 'test' || mode === 'phase1') {
-    return <Phase1TestScreen onBackToCockpit={() => setMode(null)} />;
+  const setView = (view: 'do' | 'tasks') => {
+    setCurrentView(view);
+    localStorage.setItem('focus_current_view', view);
+  };
+
+  if (currentView === 'do') {
+    return <DoMainScreen onOpenTaskView={() => setView('tasks')} />;
   }
 
   return (
     <MomentumProvider>
-      <CockpitDashboard />
+      <CockpitDashboard onOpenDoMode={() => setView('do')} />
     </MomentumProvider>
   );
 }
