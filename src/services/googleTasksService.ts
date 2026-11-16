@@ -608,22 +608,13 @@ export function syncTasksIntoBoard(
       const quickMatch = rawTitle.match(/^\[(1m|5m|15m)\]\s*(.+)$/i);
 
       // 1. TASKS (Explicitly Tagged "Task: ...", or [1m], [5m], [15m] anywhere)
-      const timingRegex = /\[(1m|5m|15m)\]/i;
+      const timingRegex = /\s*\[(?:1m|5m|15m)\]\s*/gi;
       const hasTimingTag = timingRegex.test(rawTitle);
 
       if (taskMatch || quickMatch || hasTimingTag) {
         let cleanTitle = taskMatch ? taskMatch[1].trim() : (quickMatch ? quickMatch[2].trim() : rawTitle);
-        let duration: QuickJobDuration = '5m';
-
-        // Check if duration was specified like [1m], [5m], [15m] at the end, beginning, or inside
-        const durMatch = cleanTitle.match(timingRegex);
-        if (durMatch) {
-          duration = durMatch[1].toLowerCase() as QuickJobDuration;
-          cleanTitle = cleanTitle.replace(timingRegex, '').trim();
-        } else if (quickMatch) {
-          duration = quickMatch[1].toLowerCase() as QuickJobDuration;
-        }
-
+        // Strip any timing tags [1m], [5m], [15m] from task title
+        cleanTitle = cleanTitle.replace(timingRegex, ' ').trim();
         // Clean any leading "Task: " or "Task " if present
         cleanTitle = cleanTitle.replace(/^task(?::|\s+-|\s+)\s*/i, '').trim();
 
@@ -635,7 +626,7 @@ export function syncTasksIntoBoard(
             targetListId: targetTasksListId,
             task,
             momentumType: 'quick',
-            title: `Task: ${cleanTitle} [${duration}]`,
+            title: `Task: ${cleanTitle}`,
             notes: task.notes,
           });
         }
@@ -648,7 +639,6 @@ export function syncTasksIntoBoard(
           quickJobs.unshift({
             id: `gt-qj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             title: cleanTitle,
-            duration,
             done: false,
             createdAt: Date.now(),
             googleTaskId: taskId,
@@ -882,14 +872,8 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 5. UNTAGGED REGULAR TASK: Route to Tasks (5m default) so ADHD user never loses a task
-      let cleanGenericTitle = rawTitle;
-      let genericDuration: QuickJobDuration = '5m';
-      const genericDurMatch = cleanGenericTitle.match(timingRegex);
-      if (genericDurMatch) {
-        genericDuration = genericDurMatch[1].toLowerCase() as QuickJobDuration;
-        cleanGenericTitle = cleanGenericTitle.replace(timingRegex, '').trim();
-      }
+      // 5. UNTAGGED REGULAR TASK: Route to Tasks so ADHD user never loses a task
+      let cleanGenericTitle = rawTitle.replace(timingRegex, ' ').trim();
 
       const targetTasksListId = dedicatedLists?.tasksListId || dedicatedLists?.quickJobsListId;
       if (targetTasksListId && listId !== targetTasksListId) {
@@ -898,7 +882,7 @@ export function syncTasksIntoBoard(
           targetListId: targetTasksListId,
           task,
           momentumType: 'quick',
-          title: `Task: ${cleanGenericTitle} [${genericDuration}]`,
+          title: `Task: ${cleanGenericTitle}`,
           notes: task.notes,
         });
       }
@@ -911,7 +895,6 @@ export function syncTasksIntoBoard(
         quickJobs.unshift({
           id: `gt-qj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           title: cleanGenericTitle,
-          duration: '5m',
           done: false,
           createdAt: Date.now(),
           googleTaskId: taskId,
@@ -1128,7 +1111,7 @@ export async function pushLocalTasksToGoogle(
     if (!job.googleTaskId && !job.done) {
       if (job.id === 'qj-1' || job.id === 'qj-2') continue;
       try {
-        const title = `Task: ${job.title} [${job.duration || '5m'}]`;
+        const title = `Task: ${job.title}`;
         const taskId = await createGoogleTask(accessToken, tasksListId, title);
         if (taskId) {
           updatedQuickJobs[i] = {

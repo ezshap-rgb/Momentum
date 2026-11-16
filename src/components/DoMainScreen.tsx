@@ -40,7 +40,6 @@ import {
   FocusAction,
   IgnitionExercise,
   pickNextExercise,
-  formatTimeBucket,
 } from '../services/focusServing';
 import {
   rankCandidates,
@@ -949,9 +948,6 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-bold">
                     Friction {currentAction.friction}/5
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-medium">
-                    {formatTimeBucket(currentAction.time_bucket)}
                   </span>
                 </div>
 

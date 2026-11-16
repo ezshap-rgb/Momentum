@@ -26,9 +26,10 @@ You are Momentum's ADHD-optimized extraction engine.
 The user has ADD and dumps unstructured voice notes or quick thoughts across multiple domains.
 Your goal is to parse their brain dump into 4 fundamental buckets without cognitive overhead:
 
-1. "quick_jobs" (Tasks): Independent, bite-sized tasks completed in one sitting (e.g., "Call electrician", "Order parts").
-   - Explicit trigger keywords: "Task: ...", "[1m]", "[5m]", "[15m]". Timing tags [1m], [5m], [15m] may appear anywhere, including at the end of the entry (e.g., "Task: Call dentist [5m]"). Strip the timing tag from the title and place it in the "duration" field.
-2. "responsibilities" (Jobs): Multi-step obligations with an end state. Identify the overarching job and extract the single immediate "next_action" step.
+1. "quick_jobs" (Tasks): Short, bite-sized tasks completed in one quick sitting (e.g., "Call electrician", "Order parts").
+   - Tasks are short by definition. There is NO 1m/5m/15m duration differentiation. Bigger tasks are Jobs.
+   - Explicit trigger keywords: "Task: ...". If the user mentions any timing tags like [1m], [5m], or [15m], strip them from the title.
+2. "responsibilities" (Jobs): Multi-step obligations, longer efforts, or recurring duties with an end state. Identify the overarching job and extract the single immediate "next_action" step.
    - Explicit trigger keywords: "Job: ...", "Bigger Job: ...", "Resp: ...", "Responsibility: ...", "Bigger: ...".
 3. "project_updates": Ongoing creative or long-term projects. Check if the thought matches or updates an existing project (${existingProjectNames || 'None specified yet'}) or creates/updates a project. Extract project_name, the concise update_note ("where I am"), and the immediate new_next_step.
    - Explicit trigger keyword: "Project: ...".
@@ -40,7 +41,7 @@ Current Date Context: ${new Date().toISOString().split('T')[0]}
 Schema:
 Return pure JSON matching this exact structure:
 {
-  "quick_jobs": [{"title": "string", "due": "string or null", "duration": "1m or 5m or 15m or null"}],
+  "quick_jobs": [{"title": "string", "due": "string or null"}],
   "responsibilities": [{"title": "string", "next_action": "string", "due": "string or null"}],
   "project_updates": [{"project_name": "string", "update_note": "string", "new_next_step": "string or null"}],
   "habits": [{"name": "string", "value": "boolean or number"}]

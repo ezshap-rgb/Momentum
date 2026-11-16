@@ -187,7 +187,7 @@ export const VoiceIngestionModal: React.FC<VoiceIngestionModalProps> = ({
                   <ul className="list-disc list-inside space-y-0.5 text-slate-700 dark:text-slate-200">
                     {stagedData.quick_jobs.map((j, i) => (
                       <li key={i}>
-                        {j.title} ({j.duration || '5m'})
+                        {j.title}
                       </li>
                     ))}
                   </ul>

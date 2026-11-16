@@ -353,7 +353,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Background push to Google Tasks (Webhook or OAuth)
       if (settings.googleTasksWebhookUrl) {
-        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `Task: ${cleanTitle}`).then((taskId) => {
           if (taskId) {
             updateBoard((prev) => ({
               ...prev,
@@ -365,7 +365,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
           const listId = settings.googleTaskListsMap?.tasksListId || settings.googleTaskListsMap?.quickJobsListId || '@default';
-          createGoogleTask(token, listId, `Task: ${cleanTitle} [${jobDuration}]`).then((taskId) => {
+          createGoogleTask(token, listId, `Task: ${cleanTitle}`).then((taskId) => {
             if (taskId) {
               updateBoard((prev) => ({
                 ...prev,

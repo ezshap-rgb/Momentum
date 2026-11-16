@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { useMomentum } from '../../context/MomentumContext';
-import { QuickJobDuration } from '../../types';
 import {
   Zap,
   Circle,
@@ -19,12 +18,9 @@ export const QuickJobsPanel: React.FC = () => {
     useMomentum();
 
   const [newTitle, setNewTitle] = useState('');
-  const [newDuration, setNewDuration] = useState<QuickJobDuration>('5m');
-  const [filterDuration, setFilterDuration] = useState<'all' | '1m' | '5m' | '15m'>('all');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [editDuration, setEditDuration] = useState<QuickJobDuration>('5m');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const level = panelStates.quick_jobs; // 'collapsed' | 'compact' | 'expanded'
@@ -32,25 +28,19 @@ export const QuickJobsPanel: React.FC = () => {
   const activeJobs = boardData.quick_jobs.filter((j) => !j.done);
   const completedJobs = boardData.quick_jobs.filter((j) => j.done);
 
-  const filteredActive = activeJobs.filter((j) => {
-    if (filterDuration === 'all') return true;
-    return j.duration === filterDuration;
-  });
-
   const handleAdd = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newTitle.trim()) {
       inputRef.current?.focus();
       return;
     }
-    addQuickJob(newTitle.trim(), newDuration);
+    addQuickJob(newTitle.trim());
     setNewTitle('');
   };
 
-  const startEditing = (job: { id: string; title: string; duration?: QuickJobDuration }) => {
+  const startEditing = (job: { id: string; title: string }) => {
     setEditingJobId(job.id);
     setEditTitle(job.title);
-    setEditDuration(job.duration || '5m');
     setExpandedJobId(job.id);
   };
 
@@ -58,32 +48,12 @@ export const QuickJobsPanel: React.FC = () => {
     if (!editTitle.trim()) return;
     editQuickJob(id, {
       title: editTitle.trim(),
-      duration: editDuration,
     });
     setEditingJobId(null);
   };
 
   const cancelEdit = () => {
     setEditingJobId(null);
-  };
-
-  const getDurationBadge = (d?: QuickJobDuration) => {
-    const val = d || '5m';
-    const colorClasses =
-      val === '1m'
-        ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-        : val === '5m'
-        ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800'
-        : 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800';
-
-    return (
-      <span
-        className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md border ${colorClasses} shrink-0`}
-        title={`${val} task`}
-      >
-        {val}
-      </span>
-    );
   };
 
   return (
@@ -161,22 +131,6 @@ export const QuickJobsPanel: React.FC = () => {
               enterKeyHint="done"
               className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
             />
-            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px]">
-              {(['1m', '5m', '15m'] as QuickJobDuration[]).map((dur) => (
-                <button
-                  key={dur}
-                  type="button"
-                  onClick={() => setNewDuration(dur)}
-                  className={`px-1.5 py-0.5 rounded font-bold transition ${
-                    newDuration === dur
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  {dur}
-                </button>
-              ))}
-            </div>
             <button
               type="submit"
               className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white transition shrink-0 cursor-pointer flex items-center justify-center shadow-xs"
@@ -186,37 +140,15 @@ export const QuickJobsPanel: React.FC = () => {
             </button>
           </form>
 
-          {/* Filter in Expanded */}
-          {level === 'expanded' && (
-            <div className="flex items-center justify-between text-[11px] border-b border-slate-100 dark:border-slate-800 pb-1 shrink-0">
-              <span className="text-slate-400 font-medium">Filter:</span>
-              <div className="flex items-center gap-1">
-                {(['all', '1m', '5m', '15m'] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilterDuration(f)}
-                    className={`px-1.5 py-0.2 rounded text-[10px] font-medium transition ${
-                      filterDuration === f
-                        ? 'bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-100'
-                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Scrolling List */}
           <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
-            {filteredActive.length === 0 && (
+            {activeJobs.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-4 italic">
                 No tasks pending.
               </p>
             )}
 
-            {filteredActive.map((job) => {
+            {activeJobs.map((job) => {
               const isEditing = editingJobId === job.id;
               const isExpanded = expandedJobId === job.id;
 
@@ -252,41 +184,22 @@ export const QuickJobsPanel: React.FC = () => {
                         rows={2}
                         autoFocus
                       />
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px]">
-                          {(['1m', '5m', '15m'] as QuickJobDuration[]).map((dur) => (
-                            <button
-                              key={dur}
-                              type="button"
-                              onClick={() => setEditDuration(dur)}
-                              className={`px-2 py-0.5 rounded font-bold transition ${
-                                editDuration === dur
-                                  ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                              }`}
-                            >
-                              {dur}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={cancelEdit}
-                            className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={!editTitle.trim()}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Save</span>
-                          </button>
-                        </div>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="px-2 py-1 rounded text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!editTitle.trim()}
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Save</span>
+                        </button>
                       </div>
 
                       {/* Safe Delete inside edit mode only */}
@@ -330,7 +243,6 @@ export const QuickJobsPanel: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {getDurationBadge(job.duration)}
                         <button
                           type="button"
                           onClick={() => startEditing(job)}
