@@ -4,6 +4,8 @@ import { SettingsModal } from './SettingsModal';
 import { CandidateInspectorModal } from './CandidateInspectorModal';
 import { DayMovementBenchModal } from './DayMovementBenchModal';
 import { DayCommitmentPromptModal } from './DayCommitmentPromptModal';
+import { ExperimentsModal } from './ExperimentsModal';
+import { WatchPartVector } from './WatchPartVector';
 import {
   DayModule,
   DayCommitmentLevel,
@@ -38,6 +40,11 @@ import {
   getWeightedIgnitionPick,
   addPowerReserve,
 } from '../services/focusHabits';
+import {
+  getExperimentScheduleStatus,
+  overrideExperimentMode,
+  ServeMode,
+} from '../services/focusExperiments';
 import { SyncIndicator } from './SyncIndicator';
 import {
   Zap,
@@ -58,6 +65,10 @@ import {
   Moon,
   ArrowRight,
   Sparkles,
+  FlaskConical,
+  Lock,
+  Unlock,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface Props {
@@ -123,11 +134,15 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     };
   });
 
-  // Action Flow Mode (assigned: 1 card, paired: 2 cards)
-  const [servingMode, setServingMode] = useState<'assigned' | 'paired'>(() => {
-    return (localStorage.getItem('focus_serving_mode') as 'assigned' | 'paired') || 'assigned';
+  // Action Flow Mode (assigned: 1 card, paired: 2 cards) - synced with 4-week experiment
+  const [servingMode, setServingMode] = useState<ServeMode>(() => {
+    return getExperimentScheduleStatus().effectiveMode;
   });
   const [pairedCandidates, setPairedCandidates] = useState<[CandidateScore, CandidateScore] | null>(null);
+  const [showExperimentsModal, setShowExperimentsModal] = useState(false);
+  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
+  const [targetOverrideMode, setTargetOverrideMode] = useState<ServeMode>('paired');
+  const neitherTimeoutRef = useRef<number | null>(null);
 
   // Current served action
   const [currentAction, setCurrentAction] = useState<FocusAction | null>(null);
@@ -180,8 +195,37 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     refreshActionsPool();
   };
 
+  // Phase 8: Serving Mode toggle with 4-week experiment lock
+  const handleRequestModeChange = (mode: ServeMode) => {
+    const status = getExperimentScheduleStatus();
+    if (mode === status.effectiveMode) return;
+
+    if (status.isLocked) {
+      setTargetOverrideMode(mode);
+      setShowOverrideConfirm(true);
+    } else {
+      applyModeOverride(mode);
+    }
+  };
+
+  const applyModeOverride = async (mode: ServeMode) => {
+    const status = getExperimentScheduleStatus();
+    await overrideExperimentMode(mode, status.effectiveMode, 'User manual override in Settings');
+    setServingMode(mode);
+    setShowOverrideConfirm(false);
+  };
+
   // 1. DO Tap -> Check Day Commitment on Counting Day, then Ignition Screen
   const handleDoPress = async () => {
+    // Refresh experiment schedule mode
+    const expStatus = getExperimentScheduleStatus();
+    setServingMode(expStatus.effectiveMode);
+
+    await queueEvent('do_press', {
+      timestamp: new Date().toISOString(),
+      mode: expStatus.effectiveMode,
+    });
+
     // If today is a counting day (Sun-Thu) and commitment not set today, prompt once
     const todayStr = new Date().toISOString().split('T')[0];
     const hasCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
@@ -348,13 +392,73 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     serveNextOffer(newNotNows);
   };
 
-  const handleStartAction = async () => {
+  const handleStartAction = async (actionToStart?: FocusAction) => {
+    const act = actionToStart || currentAction;
+    if (actionToStart) setCurrentAction(actionToStart);
     setStage('action_running');
     setTimerSeconds(0);
     setIsTimerRunning(true);
     await queueEvent('action_started', {
-      task_id: currentAction?.task_id,
+      task_id: act?.task_id,
+      mode: servingMode,
+      friction: act?.friction,
     });
+  };
+
+  // Paired Mode Card Choices
+  const handleSelectUpperPaired = async (cand: CandidateScore) => {
+    setCurrentAction(cand.action);
+    setCurrentScoreData(cand);
+    setTapShift((prev) => prev + 1); // bigger part signal (+1 ramp)
+    await queueEvent('tap_shift', {
+      direction: 'bigger',
+      source: 'paired_upper_choice',
+      task_id: cand.action.task_id,
+    });
+    handleStartAction(cand.action);
+  };
+
+  const handleSelectLowerPaired = async (cand: CandidateScore) => {
+    setCurrentAction(cand.action);
+    setCurrentScoreData(cand);
+    setTapShift((prev) => prev - 1); // smaller part signal (-1 easing)
+    await queueEvent('tap_shift', {
+      direction: 'smaller',
+      source: 'paired_lower_choice',
+      task_id: cand.action.task_id,
+    });
+    handleStartAction(cand.action);
+  };
+
+  const handleNeither = async () => {
+    const newNotNows = consecutiveNotNows + 1;
+    setConsecutiveNotNows(newNotNows);
+    setTapShift((prev) => prev - 1); // easing
+
+    await queueEvent('not_now', {
+      task_id: currentAction?.task_id,
+      reason: 'neither',
+      mode: 'paired',
+      consecutive: newNotNows,
+    });
+
+    serveNextOffer(newNotNows);
+  };
+
+  const handleNeitherPressStart = () => {
+    neitherTimeoutRef.current = window.setTimeout(() => {
+      handleNeither();
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate(50); } catch (_) {}
+      }
+    }, 600);
+  };
+
+  const handleNeitherPressEnd = () => {
+    if (neitherTimeoutRef.current) {
+      clearTimeout(neitherTimeoutRef.current);
+      neitherTimeoutRef.current = null;
+    }
   };
 
   // 5. Action Execution Controls
@@ -365,6 +469,8 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     await queueEvent('action_completed', {
       task_id: currentAction?.task_id,
       actual_minutes: minutes,
+      friction: currentAction?.friction,
+      mode: servingMode,
     });
 
     if (currentAction) {
@@ -476,6 +582,16 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
             <span className="hidden xs:inline">Bench</span>
           </button>
 
+          {/* 4-Week Serving Experiment Modal Button */}
+          <button
+            onClick={() => setShowExperimentsModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
+            title={`Serving Experiment: Week ${getExperimentScheduleStatus().weekNumber} of 4 (${servingMode})`}
+          >
+            <FlaskConical className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden xs:inline">Experiment</span>
+          </button>
+
           <SyncIndicator />
 
           <button
@@ -571,51 +687,135 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       {stage === 'offer' && currentAction && !showConfig && (
         <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full px-4 animate-fadeIn">
           {servingMode === 'paired' && pairedCandidates ? (
-            /* PAIRED MODE: Two Action Cards to choose from */
+            /* PAIRED MODE: Upper Card (T+1, More Reward) & Lower Card (T-1, Easier Entry) */
             <div className="w-full space-y-3">
-              <div className="text-center text-xs font-bold text-purple-300 uppercase tracking-wider mb-2">
-                Choose Your Next Action
+              <div className="text-center text-xs font-bold text-purple-300 uppercase tracking-wider mb-1 flex items-center justify-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Choose Your Next Action</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {pairedCandidates.map((cand, idx) => {
-                  const act = cand.action;
+              <div className="flex flex-col gap-3">
+                {/* UPPER CARD: Target + 1 (More Reward) */}
+                {(() => {
+                  const upper = pairedCandidates[0];
+                  const act = upper.action;
+                  const fric = Number(act.friction) || 2;
+                  const partSize = getPartSizeForFriction(fric);
+                  const workVal = calculateWorkValue(fric, act.importance);
+                  const finishGrade = calculateFinishGrade(act.due_date, act.created_at);
+
                   return (
                     <div
                       key={act.task_id}
-                      onClick={() => {
-                        setCurrentAction(act);
-                        setCurrentScoreData(cand);
-                        handleStartAction();
-                      }}
-                      className="bg-slate-900/95 border border-purple-500/30 hover:border-purple-400 p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group"
+                      onClick={() => handleSelectUpperPaired(upper)}
+                      className="bg-slate-900/95 border-2 border-purple-500/40 hover:border-purple-400 p-4 sm:p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group relative overflow-hidden"
                     >
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <span className="px-2 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[10px] font-bold">
-                            Friction {act.friction}/5
-                          </span>
-                          <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[10px] font-bold">
+                              Friction {act.friction}/5
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
+                              More Reward (+{workVal} pts)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                            <WatchPartVector partSize={partSize} finishGrade={finishGrade} isFilled={true} />
+                            <span className="text-[10px] font-bold text-amber-300 capitalize">
+                              {finishGrade} {partSize}
+                            </span>
+                          </div>
                         </div>
-                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition mb-3">
+
+                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition my-1.5">
                           {act.title}
                         </h3>
+
+                        {act.project_title && (
+                          <div className="text-[11px] text-purple-400 font-semibold mb-2">
+                            📁 {act.project_title}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[11px] text-purple-400 font-bold">Tap to Start</span>
-                        <Play className="w-4 h-4 text-purple-400 fill-current" />
+                      <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                        <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
+                          <span>Select & Start</span>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        </div>
                       </div>
                     </div>
                   );
-                })}
+                })()}
+
+                {/* LOWER CARD: Target - 1 (Easier Entry) */}
+                {(() => {
+                  const lower = pairedCandidates[1];
+                  const act = lower.action;
+                  const fric = Number(act.friction) || 2;
+                  const partSize = getPartSizeForFriction(fric);
+                  const workVal = calculateWorkValue(fric, act.importance);
+                  const finishGrade = calculateFinishGrade(act.due_date, act.created_at);
+
+                  return (
+                    <div
+                      key={act.task_id}
+                      onClick={() => handleSelectLowerPaired(lower)}
+                      className="bg-slate-900/95 border-2 border-slate-700/60 hover:border-purple-400 p-4 sm:p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group relative overflow-hidden"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold">
+                              Friction {act.friction}/5
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-700/60 text-indigo-300 text-[10px] font-bold uppercase tracking-wider">
+                              Easier Entry (+{workVal} pts)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                            <WatchPartVector partSize={partSize} finishGrade={finishGrade} isFilled={true} />
+                            <span className="text-[10px] font-bold text-amber-300 capitalize">
+                              {finishGrade} {partSize}
+                            </span>
+                          </div>
+                        </div>
+
+                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition my-1.5">
+                          {act.title}
+                        </h3>
+
+                        {act.project_title && (
+                          <div className="text-[11px] text-purple-400 font-semibold mb-2">
+                            📁 {act.project_title}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                        <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
+                          <span>Select & Start</span>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
-              {/* Not now / Skip pair button */}
+              {/* Long-press / Hidden Neither Button */}
               <div className="flex justify-center pt-2">
                 <button
-                  onClick={handleNotNow}
-                  className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs font-semibold border border-slate-800 transition"
+                  onMouseDown={handleNeitherPressStart}
+                  onMouseUp={handleNeitherPressEnd}
+                  onTouchStart={handleNeitherPressStart}
+                  onTouchEnd={handleNeitherPressEnd}
+                  onClick={handleNeither}
+                  className="py-2.5 px-5 rounded-xl bg-slate-900/90 hover:bg-slate-800 active:scale-95 text-slate-400 hover:text-slate-200 text-xs font-semibold border border-slate-800 transition"
+                  title="Long press or tap if neither fits right now (counts as not now)"
                 >
                   Neither right now (Not now)
                 </button>
@@ -667,7 +867,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
               {/* START BUTTON */}
               <button
-                onClick={handleStartAction}
+                onClick={() => handleStartAction()}
                 className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-black text-lg shadow-xl shadow-purple-900/40 transition flex items-center justify-center gap-2 mb-4 cursor-pointer"
               >
                 <Play className="w-5 h-5 fill-current" />
@@ -848,18 +1048,29 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                 </button>
               </div>
 
-              {/* Action Flow Mode Switch (Assigned vs Paired) */}
+              {/* Action Flow Mode Switch (Assigned vs Paired) with Experiment Schedule */}
               <div className="pt-2 pb-3 border-b border-slate-800">
-                <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
-                  Action Serving Mode:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-300">
+                    Action Serving Mode:
+                  </label>
                   <button
                     type="button"
                     onClick={() => {
-                      setServingMode('assigned');
-                      localStorage.setItem('focus_serving_mode', 'assigned');
+                      setShowConfig(false);
+                      setShowExperimentsModal(true);
                     }}
+                    className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-semibold"
+                  >
+                    <FlaskConical className="w-3 h-3" />
+                    <span>View Experiment</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRequestModeChange('assigned')}
                     className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition ${
                       servingMode === 'assigned'
                         ? 'bg-purple-600 border-purple-400 text-white shadow-sm'
@@ -870,10 +1081,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setServingMode('paired');
-                      localStorage.setItem('focus_serving_mode', 'paired');
-                    }}
+                    onClick={() => handleRequestModeChange('paired')}
                     className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition ${
                       servingMode === 'paired'
                         ? 'bg-purple-600 border-purple-400 text-white shadow-sm'
@@ -882,6 +1090,21 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                   >
                     2 Cards (Paired Choice)
                   </button>
+                </div>
+
+                <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between">
+                  <span>
+                    Week {getExperimentScheduleStatus().weekNumber} of 4: {getExperimentScheduleStatus().scheduledMode} scheduled
+                  </span>
+                  {getExperimentScheduleStatus().isLocked ? (
+                    <span className="text-amber-400 flex items-center gap-0.5 font-medium">
+                      <Lock className="w-2.5 h-2.5" /> Locked
+                    </span>
+                  ) : (
+                    <span className="text-purple-400 flex items-center gap-0.5 font-medium">
+                      <Unlock className="w-2.5 h-2.5" /> Override
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1040,6 +1263,45 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
           suggestedLevel={dayModule.committed_level}
           onCommit={handleCommitChoice}
         />
+      )}
+
+      {/* Serving Mode Experiment Analytics Modal (Phase 8) */}
+      {showExperimentsModal && (
+        <ExperimentsModal
+          isOpen={showExperimentsModal}
+          onClose={() => setShowExperimentsModal(false)}
+          onServingModeChanged={(newMode) => setServingMode(newMode)}
+        />
+      )}
+
+      {/* Confirmation Modal for Locked Week Override in Settings */}
+      {showOverrideConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertTriangle className="w-5 h-5" />
+              <h3 className="font-extrabold text-white text-base">Override Week Lock?</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              The 4-week experiment locks the serving mode by week to maintain fair, unbiased metrics.
+              Overriding will log a <code className="text-amber-300">mode_override</code> event.
+            </p>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setShowOverrideConfirm(false)}
+                className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+              >
+                Keep Lock
+              </button>
+              <button
+                onClick={() => applyModeOverride(targetOverrideMode)}
+                className="flex-1 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
+              >
+                Override Now
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

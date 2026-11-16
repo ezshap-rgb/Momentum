@@ -307,26 +307,79 @@ export function rankCandidates(
 
   candidates.sort((a, b) => b.totalScore - a.totalScore);
 
-  // Paired Mode: Pick 2 contrasting candidates (e.g. 1 smaller friction / lighter, 1 bigger / more rewarding)
-  let paired: [CandidateScore, CandidateScore] | null = null;
-  if (candidates.length >= 2) {
-    const first = candidates[0];
-    // Find candidate with different friction or lower effort
-    let second = candidates.find((c) => c.action.task_id !== first.action.task_id && c.effectiveFriction !== first.effectiveFriction);
-    if (!second) {
-      second = candidates[1];
-    }
-    // Sort pair so smaller/lighter is card A, bigger/rewarding is card B
-    if (first.effectiveFriction <= second.effectiveFriction) {
-      paired = [first, second];
-    } else {
-      paired = [second, first];
-    }
-  }
+  // Paired Mode: upper card at target+1, lower card at target-1, differing projects when possible
+  const paired = selectPairedCandidates(candidates, targetFriction);
 
   return {
     selected: candidates[0] || null,
     ranked: candidates,
     paired,
   };
+}
+
+/**
+ * Phase 8: Pair selection function using existing ranking
+ * Upper card: best-ranked at target + 1 (more reward)
+ * Lower card: best-ranked at target - 1 (less reward), from a different project when possible
+ */
+export function selectPairedCandidates(
+  rankedCandidates: CandidateScore[],
+  targetFriction: number
+): [CandidateScore, CandidateScore] | null {
+  if (rankedCandidates.length < 2) return null;
+
+  const targetUpper = Math.min(5, targetFriction + 1);
+  const targetLower = Math.max(1, targetFriction - 1);
+
+  // 1. Find candidates matching targetUpper (friction = T + 1)
+  let upper = rankedCandidates.find((c) => c.effectiveFriction === targetUpper);
+  if (!upper) {
+    // Fallback: candidate with friction > targetFriction, or highest friction candidate
+    upper = rankedCandidates.find((c) => c.effectiveFriction > targetFriction) || rankedCandidates[0];
+  }
+
+  // 2. Find candidates matching targetLower (friction = T - 1)
+  // Prefer candidate from a different project than upper
+  const upperProjectId = upper.action.project_id || upper.action.project_title || '';
+  const remaining = rankedCandidates.filter((c) => c.action.task_id !== upper!.action.task_id);
+
+  let lower = remaining.find((c) => {
+    const proj = c.action.project_id || c.action.project_title || '';
+    const diffProject = proj && upperProjectId ? proj !== upperProjectId : true;
+    return c.effectiveFriction === targetLower && diffProject;
+  });
+
+  if (!lower) {
+    // Try matching targetLower regardless of project
+    lower = remaining.find((c) => c.effectiveFriction === targetLower);
+  }
+
+  if (!lower) {
+    // Try candidate with friction < targetFriction from different project
+    lower = remaining.find((c) => {
+      const proj = c.action.project_id || c.action.project_title || '';
+      const diffProject = proj && upperProjectId ? proj !== upperProjectId : true;
+      return c.effectiveFriction < targetFriction && diffProject;
+    });
+  }
+
+  if (!lower) {
+    // Try candidate with friction < targetFriction
+    lower = remaining.find((c) => c.effectiveFriction < targetFriction);
+  }
+
+  if (!lower) {
+    // Fallback: any other candidate, preferring different project
+    lower = remaining.find((c) => {
+      const proj = c.action.project_id || c.action.project_title || '';
+      return proj && upperProjectId ? proj !== upperProjectId : false;
+    }) || remaining[0];
+  }
+
+  if (!lower || lower.action.task_id === upper.action.task_id) {
+    return null;
+  }
+
+  // Return [upper (target+1 / more reward), lower (target-1 / less reward)]
+  return [upper, lower];
 }

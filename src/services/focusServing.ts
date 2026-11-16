@@ -10,6 +10,8 @@ export interface FocusAction {
   category?: 'quick' | 'scheduled' | 'project' | 'habit';
   type?: 'physical' | 'mental' | 'social' | 'admin';
   parent_id?: string;
+  project_id?: string;
+  project_title?: string;
   order?: string;
   active_step?: string;
   context?: string;
