@@ -677,66 +677,38 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Watchmaker Bench Button (Shows movement parts & rewards) */}
-          <button
-            onClick={() => setShowBenchModal(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
-            title="Open Watchmaker Bench (Day Movement Progress)"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden xs:inline">Bench</span>
-          </button>
-
-          {/* Watchmaker Collection Vault Button (Phase 11) */}
-          <button
-            onClick={() => setShowCollectionModal(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
-            title="Open Watchmaker's Collection (Crafted Timepieces)"
-          >
-            <Watch className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden xs:inline">Vault</span>
-          </button>
-
-          {/* 4-Week Serving Experiment Modal Button */}
-          <button
-            onClick={() => setShowExperimentsModal(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
-            title={`Serving Experiment: Week ${getExperimentScheduleStatus().weekNumber} of 4 (${servingMode})`}
-          >
-            <FlaskConical className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden xs:inline">Experiment</span>
-          </button>
-
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <SyncIndicator />
 
           {onOpenPlanMode && (
             <button
               onClick={onOpenPlanMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-semibold text-purple-300 transition shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-semibold text-purple-300 transition shadow-sm shrink-0"
               title="Open Plan Mode (Calm Review, Pool & Settings)"
             >
               <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden xs:inline">Plan</span>
+              <span className="hidden sm:inline">Plan</span>
             </button>
           )}
 
           <button
             onClick={onOpenTaskView}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition shadow-sm shrink-0"
+            title="Open Task View (Matrix)"
           >
             <LayoutGrid className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden xs:inline">Task View</span>
+            <span className="hidden sm:inline">Task View</span>
           </button>
 
           <button
             onClick={() => setShowConfig(!showConfig)}
-            className={`p-2 rounded-xl border text-xs transition ${
+            className={`p-2 rounded-xl border text-xs transition shrink-0 ${
               showConfig
                 ? 'bg-purple-600 text-white border-purple-500'
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
             }`}
-            title="Configure Apps Script Doorway"
+            title="Configure Apps Script Doorway & Settings"
+            aria-label="Settings"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -1332,27 +1304,60 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         </div>
       )}
 
-      {/* Bottom Bar: Action Layer branding & theme toggle */}
-      <div className="flex items-center justify-between text-[11px] text-slate-500 pb-1 px-1 shrink-0">
-        <span>Focus Action Layer</span>
+      {/* Bottom Bar: Action Layer branding, Experiment, Vault & theme toggle */}
+      <div className="flex items-center justify-between text-[11px] text-slate-500 pb-1 px-1 shrink-0 gap-2">
+        <span className="hidden xs:inline text-[10px]">Focus Action Layer</span>
 
-        <button
-          onClick={toggleTheme}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 transition active:scale-95"
-          title={`Task View Theme: Currently ${settings.theme === 'dark' ? 'Dark' : 'Light'}. Tap to switch.`}
-        >
-          {settings.theme === 'dark' ? (
-            <>
-              <Moon className="w-3.5 h-3.5 text-purple-400" />
-              <span className="text-[10px] text-slate-400 font-medium">Dark</span>
-            </>
-          ) : (
-            <>
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-[10px] text-slate-400 font-medium">Light</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-1.5 ml-auto">
+          {/* Watchmaker Bench Progress */}
+          <button
+            onClick={() => setShowBenchModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-slate-400 hover:text-amber-300 transition active:scale-95"
+            title="Open Watchmaker Bench (Day Movement Progress)"
+          >
+            <Sparkles className="w-3 h-3 text-amber-400" />
+            <span className="text-[10px] font-medium">Bench</span>
+          </button>
+
+          {/* Watchmaker Collection Vault Button (Phase 11) */}
+          <button
+            onClick={() => setShowCollectionModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-slate-400 hover:text-purple-300 transition active:scale-95"
+            title="Open Watchmaker's Collection (Crafted Timepieces)"
+          >
+            <Watch className="w-3 h-3 text-purple-400" />
+            <span className="text-[10px] font-medium">Vault</span>
+          </button>
+
+          {/* 4-Week Serving Experiment Modal Button (Phase 8) */}
+          <button
+            onClick={() => setShowExperimentsModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-slate-400 hover:text-purple-300 transition active:scale-95"
+            title={`Serving Experiment: Week ${getExperimentScheduleStatus().weekNumber} of 4 (${servingMode})`}
+          >
+            <FlaskConical className="w-3 h-3 text-purple-400" />
+            <span className="text-[10px] font-medium">Experiment</span>
+          </button>
+
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 transition active:scale-95"
+            title={`Task View Theme: Currently ${settings.theme === 'dark' ? 'Dark' : 'Light'}. Tap to switch.`}
+          >
+            {settings.theme === 'dark' ? (
+              <>
+                <Moon className="w-3 h-3 text-purple-400" />
+                <span className="text-[10px]">Dark</span>
+              </>
+            ) : (
+              <>
+                <Sun className="w-3 h-3 text-amber-400" />
+                <span className="text-[10px]">Light</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Momentum Full Settings Modal */}
