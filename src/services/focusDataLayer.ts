@@ -124,7 +124,7 @@ export async function removeEventsFromOutbox(eventIds: string[]): Promise<void> 
 
 // 3. Background Sync & Batching
 export const SYNC_CHUNK_SIZE = 50;
-export const FETCH_TIMEOUT_MS = 8000;
+export const FETCH_TIMEOUT_MS = 25000;
 const INITIAL_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
 
@@ -176,8 +176,18 @@ function scheduleRetryBackoff() {
   }, delay);
 }
 
-export async function triggerBackgroundSync(): Promise<boolean> {
-  if (isSyncInProgress) return false;
+export async function triggerBackgroundSync(force = false): Promise<boolean> {
+  if (force) {
+    resetRetryBackoff();
+  }
+  if (isSyncInProgress) {
+    let waited = 0;
+    while (isSyncInProgress && waited < 15) {
+      await new Promise((r) => setTimeout(r, 200));
+      waited++;
+    }
+    if (isSyncInProgress) return false;
+  }
   const { url, key } = getStoredCredentials();
   if (!url || !key) return false;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -240,7 +250,7 @@ export async function triggerBackgroundSync(): Promise<boolean> {
       }
     }
   } catch (err: any) {
-    const errorMsg = err.name === 'AbortError' ? 'Sync timed out' : (err.message || 'Network sync error');
+    const errorMsg = err.name === 'AbortError' ? 'Sync timed out (Apps Script waking up)' : (err.message || 'Network sync error');
     notifySyncStateChange(errorMsg);
     scheduleRetryBackoff();
     isSyncInProgress = false;
@@ -252,7 +262,7 @@ export async function triggerBackgroundSync(): Promise<boolean> {
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
     resetRetryBackoff();
-    triggerBackgroundSync();
+    triggerBackgroundSync(true);
   });
   window.addEventListener('focus', () => {
     triggerBackgroundSync();
@@ -298,9 +308,30 @@ export async function readTabFromSheet(tab: string): Promise<any[]> {
       await cacheTab(tab, data.rows);
       return data.rows;
     }
+    // Fallback to GET if backend returned not ok (e.g. deployment not yet updated to handle POST read_tab)
+    if (!data.ok) {
+      const getUrl = `${url}?key=${encodeURIComponent(key)}&tab=${encodeURIComponent(tab)}`;
+      const getResp = await fetch(getUrl);
+      const getData = await getResp.json();
+      if (getData.ok && Array.isArray(getData.rows)) {
+        await cacheTab(tab, getData.rows);
+        return getData.rows;
+      }
+    }
   } catch (err) {
     clearTimeout(timeoutId);
-    console.warn(`Could not fetch tab ${tab} online via POST, falling back to cache`, err);
+    console.warn(`Could not fetch tab ${tab} online via POST, attempting GET fallback...`, err);
+    try {
+      const getUrl = `${url}?key=${encodeURIComponent(key)}&tab=${encodeURIComponent(tab)}`;
+      const getResp = await fetch(getUrl);
+      const getData = await getResp.json();
+      if (getData.ok && Array.isArray(getData.rows)) {
+        await cacheTab(tab, getData.rows);
+        return getData.rows;
+      }
+    } catch (getErr) {
+      console.warn(`GET fallback also failed for tab ${tab}, using local cache`, getErr);
+    }
   }
 
   return getCachedTab(tab);

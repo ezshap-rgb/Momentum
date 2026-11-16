@@ -23,7 +23,7 @@ export function SyncIndicator() {
 
   const handleSyncClick = async () => {
     setIsSyncing(true);
-    await triggerBackgroundSync();
+    await triggerBackgroundSync(true);
     setIsSyncing(false);
   };
 

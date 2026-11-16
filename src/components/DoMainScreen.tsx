@@ -347,13 +347,30 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     serveNextOffer(consecutiveNotNows);
   };
 
-  const serveNextOffer = (notNowCount: number) => {
+  const serveNextOffer = (
+    notNowCount: number,
+    overrides?: {
+      pool?: FocusAction[];
+      completed?: FocusAction[];
+      skipped?: Set<string>;
+      activeMinutes?: number;
+      tapShiftVal?: number;
+      lastType?: string;
+    }
+  ) => {
+    const activePool = overrides?.pool || actionsPool;
+    const activeCompleted = overrides?.completed || completedActions;
+    const activeSkipped = overrides?.skipped || skippedTaskIds;
+    const activeMinutes = overrides?.activeMinutes ?? totalActiveMinutes;
+    const activeTapShift = overrides?.tapShiftVal ?? tapShift;
+    const activeLastType = overrides?.lastType ?? lastCompletedType;
+
     // If today is a counting day and commitment is not set yet, serve Daily Calibration as first action
     const todayStr = new Date().toISOString().split('T')[0];
     const hasCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
     const calibTaskId = 'action_daily_calibration_' + todayStr;
 
-    if (isCountingDay() && !hasCommittedToday && !skippedTaskIds.has(calibTaskId)) {
+    if (isCountingDay() && !hasCommittedToday && !activeSkipped.has(calibTaskId)) {
       const dailyCalibAction: FocusAction = {
         task_id: calibTaskId,
         title: "Daily Calibration: Set Today's Commitment",
@@ -397,41 +414,71 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     }
 
     const ctx: SessionContext = {
-      completedActions,
-      totalActiveMinutes,
-      tapShift,
+      completedActions: activeCompleted,
+      totalActiveMinutes: activeMinutes,
+      tapShift: activeTapShift,
       consecutiveSmallerTaps: 0,
       fewerRepsTapped,
       reservedSlotUsedToday: reservedSlotUsed,
       stretchProbeUsedToday: stretchProbeUsed,
-      skippedTaskIds,
-      lastCompletedType,
+      skippedTaskIds: activeSkipped,
+      lastCompletedType: activeLastType,
       now: new Date(),
     };
 
-    const { selected, ranked, paired } = rankCandidates(actionsPool, ctx);
+    const { selected, ranked, paired } = rankCandidates(activePool, ctx);
     setRankedCandidates(ranked);
-    setPairedCandidates(paired);
 
-    if (servingMode === 'paired' && paired) {
-      setCurrentAction(paired[0].action);
-      setCurrentScoreData(paired[0]);
-    } else if (selected) {
-      setCurrentAction(selected.action);
-      setCurrentScoreData(selected);
-      if (selected.isReservedSlot) setReservedSlotUsed(true);
+    // If paired mode is active:
+    let resolvedPair = paired;
+    if (servingMode === 'paired') {
+      if (!resolvedPair && ranked.length >= 2) {
+        // Paired mode active but candidates had same friction or target friction was high:
+        // Synthesize an easier lower option using the second candidate's first physical step!
+        const upperCand = ranked[0];
+        const lowerCandRaw = ranked[1];
+        const lowerAction: FocusAction = {
+          ...lowerCandRaw.action,
+          title: lowerCandRaw.action.first_action || `${lowerCandRaw.action.title} (First 2-min step)`,
+          friction: Math.max(1, (Number(upperCand.action.friction) || 2) - 1),
+        };
+        const synthesizedLower: CandidateScore = {
+          ...lowerCandRaw,
+          effectiveFriction: Math.max(1, upperCand.effectiveFriction - 1),
+          action: lowerAction,
+          reasons: [...lowerCandRaw.reasons, 'Paired mode: Shrunk to easier step'],
+        };
+        resolvedPair = [upperCand, synthesizedLower];
+      }
+
+      setPairedCandidates(resolvedPair);
+      if (resolvedPair) {
+        setCurrentAction(resolvedPair[0].action);
+        setCurrentScoreData(resolvedPair[0]);
+      } else if (selected) {
+        setCurrentAction(selected.action);
+        setCurrentScoreData(selected);
+        if (selected.isReservedSlot) setReservedSlotUsed(true);
+      }
     } else {
-      // Fallback action if pool is empty
-      const fallback: FocusAction = {
-        task_id: 'default_action',
-        title: 'Choose one quick thing right in front of you',
-        friction: 2,
-        time_bucket: 'under 5',
-        first_action: 'Stand up and take the first physical step',
-        status: 'waiting',
-      };
-      setCurrentAction(fallback);
-      setCurrentScoreData(null);
+      setPairedCandidates(null);
+      if (selected) {
+        setCurrentAction(selected.action);
+        setCurrentScoreData(selected);
+        if (selected.isReservedSlot) setReservedSlotUsed(true);
+      } else {
+        // Fallback action if pool is empty
+        const fallback: FocusAction = {
+          task_id: 'default_action',
+          title: 'Choose one quick thing right in front of you',
+          friction: 2,
+          time_bucket: 'under 5',
+          first_action: 'Stand up and take the first physical step',
+          status: 'waiting',
+        };
+        setCurrentAction(fallback);
+        setCurrentScoreData(null);
+      }
     }
 
     // Two not-nows in a row -> offer becomes only the tiny first physical action!
@@ -454,11 +501,12 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       setShowCommitPrompt(true);
       return;
     }
-    setTapShift((prev) => prev - 1);
+    const nextTapShift = tapShift - 1;
+    setTapShift(nextTapShift);
     await queueEvent('smaller_part', {
       task_id: currentAction?.task_id,
     });
-    serveNextOffer(consecutiveNotNows);
+    serveNextOffer(consecutiveNotNows, { tapShiftVal: nextTapShift });
   };
 
   const handleBiggerPart = async () => {
@@ -466,11 +514,12 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       setShowCommitPrompt(true);
       return;
     }
-    setTapShift((prev) => prev + 1);
+    const nextTapShift = tapShift + 1;
+    setTapShift(nextTapShift);
     await queueEvent('bigger_part', {
       task_id: currentAction?.task_id,
     });
-    serveNextOffer(consecutiveNotNows);
+    serveNextOffer(consecutiveNotNows, { tapShiftVal: nextTapShift });
   };
 
   const handleNotNow = async () => {
@@ -486,7 +535,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       consecutive: newNotNows,
     });
 
-    serveNextOffer(newNotNows);
+    serveNextOffer(newNotNows, { skipped });
   };
 
   const handleStartAction = async (actionToStart?: FocusAction) => {
@@ -533,8 +582,17 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
 
   const handleNeither = async () => {
     const newNotNows = consecutiveNotNows + 1;
+    const nextTapShift = tapShift - 1;
+    const skipped = new Set(skippedTaskIds);
+    if (currentAction) skipped.add(currentAction.task_id);
+    if (pairedCandidates) {
+      skipped.add(pairedCandidates[0].action.task_id);
+      skipped.add(pairedCandidates[1].action.task_id);
+    }
+
     setConsecutiveNotNows(newNotNows);
-    setTapShift((prev) => prev - 1); // easing
+    setTapShift(nextTapShift);
+    setSkippedTaskIds(skipped);
 
     await queueEvent('not_now', {
       task_id: currentAction?.task_id,
@@ -543,7 +601,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       consecutive: newNotNows,
     });
 
-    serveNextOffer(newNotNows);
+    serveNextOffer(newNotNows, { skipped, tapShiftVal: nextTapShift });
   };
 
   const handleNeitherPressStart = () => {
@@ -591,8 +649,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         earned_at: new Date().toISOString(),
       };
 
-      // Phase 10: Audio completion chime & haptic feedback
-      playGentleCompletionChime();
+      // Phase 10: Audio completion chime & haptic feedback (audio chime disabled per user preference)
       triggerHaptic([60, 40, 60]);
 
       // Phase 11: If completing on Friday or Saturday (off days), record polish upgrades!
@@ -624,13 +681,27 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         };
       });
 
-      setActionsPool((prev) =>
-        prev.map((a) =>
-          a.task_id === currentAction.task_id ? { ...a, status: 'done', completed_at: new Date().toISOString() } : a
-        )
+      const updatedPool = actionsPool.map((a) =>
+        a.task_id === currentAction.task_id ? { ...a, status: 'done' as const, completed_at: new Date().toISOString() } : a
       );
-      setCompletedActions((prev) => [...prev, currentAction]);
+      const updatedCompleted = [...completedActions, currentAction];
+
+      setActionsPool(updatedPool);
+      setCompletedActions(updatedCompleted);
       setLastCompletedType(currentAction.type);
+
+      const updatedMinutes = totalActiveMinutes + minutes;
+      setTotalActiveMinutes(updatedMinutes);
+      setConsecutiveNotNows(0);
+
+      // ADHD Action Flow: keep going in the string immediately with updated state!
+      serveNextOffer(0, {
+        pool: updatedPool,
+        completed: updatedCompleted,
+        activeMinutes: updatedMinutes,
+        lastType: currentAction.type,
+      });
+      return;
     }
 
     setTotalActiveMinutes((prev) => prev + minutes);
