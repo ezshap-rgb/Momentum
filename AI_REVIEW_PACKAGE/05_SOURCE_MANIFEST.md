@@ -1,0 +1,66 @@
+# Source Code Manifest
+
+Total sanitized source files included: **60**
+
+| Relative Path | Size (Bytes) | Est. Tokens | In Essential Bundle? |
+| :--- | ---: | ---: | :---: |
+| `.gitattributes` | 66 | ~16 | No |
+| `.gitignore` | 50 | ~12 | No |
+| `apps-script/Code.gs` | 27,315 | ~6,827 | No |
+| `docs/DATA_MODEL.md` | 3,055 | ~763 | No |
+| `docs/GEMINI_CAPTURE.md` | 3,167 | ~791 | No |
+| `docs/RULES.md` | 1,515 | ~378 | No |
+| `index.html` | 2,612 | ~652 | No |
+| `package.json` | 597 | ~149 | Yes |
+| `postcss.config.js` | 81 | ~20 | No |
+| `public/manifest.json` | 1,161 | ~290 | No |
+| `public/sw.js` | 1,835 | ~458 | No |
+| `README.md` | 3,009 | ~751 | No |
+| `src/App.tsx` | 12,545 | ~3,135 | No |
+| `src/components/CalendarPanel.tsx` | 25,954 | ~6,484 | No |
+| `src/components/CandidateInspectorModal.tsx` | 4,150 | ~1,037 | No |
+| `src/components/DayCommitmentPromptModal.tsx` | 3,389 | ~846 | No |
+| `src/components/DayMovementBenchModal.tsx` | 6,801 | ~1,699 | No |
+| `src/components/DoMainScreen.tsx` | 58,525 | ~14,628 | No |
+| `src/components/ExperimentsModal.tsx` | 20,031 | ~5,005 | No |
+| `src/components/FridaySummaryModal.tsx` | 5,589 | ~1,396 | No |
+| `src/components/GearTrainWidget.tsx` | 2,119 | ~529 | No |
+| `src/components/Header.tsx` | 13,668 | ~3,413 | No |
+| `src/components/panels/BiggerJobsPanel.tsx` | 31,890 | ~7,967 | No |
+| `src/components/panels/HabitsPanel.tsx` | 31,908 | ~7,976 | No |
+| `src/components/panels/ProjectsPanel.tsx` | 24,673 | ~6,166 | No |
+| `src/components/panels/QuickJobsPanel.tsx` | 16,454 | ~4,112 | No |
+| `src/components/Phase1TestScreen.tsx` | 6,091 | ~1,522 | No |
+| `src/components/PlanModeScreen.tsx` | 54,419 | ~13,602 | No |
+| `src/components/SettingsModal.tsx` | 28,644 | ~7,157 | No |
+| `src/components/SetupGuideModal.tsx` | 12,306 | ~3,069 | No |
+| `src/components/SyncIndicator.tsx` | 3,363 | ~840 | No |
+| `src/components/VoiceIngestionModal.tsx` | 10,935 | ~2,733 | No |
+| `src/components/WatchCollectionModal.tsx` | 11,554 | ~2,886 | No |
+| `src/components/WatchPartVector.tsx` | 4,723 | ~1,180 | No |
+| `src/components/WatchVectorIllustration.tsx` | 5,871 | ~1,467 | No |
+| `src/components/WhereWasIModal.tsx` | 9,476 | ~2,368 | No |
+| `src/context/MomentumContext.tsx` | 51,287 | ~12,819 | No |
+| `src/index.css` | 1,385 | ~346 | No |
+| `src/main.tsx` | 237 | ~59 | No |
+| `src/services/focusAlgorithm.ts` | 13,043 | ~3,260 | Yes |
+| `src/services/focusCollection.ts` | 10,283 | ~2,570 | No |
+| `src/services/focusDataLayer.ts` | 7,395 | ~1,848 | Yes |
+| `src/services/focusDoorway.ts` | 2,475 | ~618 | No |
+| `src/services/focusExperiments.ts` | 13,748 | ~3,437 | No |
+| `src/services/focusHabits.ts` | 4,944 | ~1,236 | No |
+| `src/services/focusMovement.ts` | 4,372 | ~1,093 | Yes |
+| `src/services/focusServing.ts` | 3,798 | ~949 | Yes |
+| `src/services/focusWakeLock.ts` | 3,185 | ~796 | No |
+| `src/services/geminiService.ts` | 6,023 | ~1,505 | No |
+| `src/services/googleTasksService.ts` | 44,613 | ~11,152 | No |
+| `src/services/soundService.ts` | 2,483 | ~620 | No |
+| `src/services/speechService.ts` | 2,642 | ~660 | No |
+| `src/services/storageService.ts` | 10,616 | ~2,654 | No |
+| `src/types/index.ts` | 4,373 | ~1,093 | No |
+| `Start-Momentum-Widget.bat` | 141 | ~35 | No |
+| `Start-Momentum-Widget.ps1` | 2,145 | ~536 | No |
+| `Start-Momentum.bat` | 840 | ~210 | No |
+| `tailwind.config.js` | 340 | ~85 | No |
+| `tsconfig.json` | 512 | ~128 | No |
+| `vite.config.ts` | 228 | ~57 | No |

@@ -1,0 +1,7 @@
+[
+  "package.json",
+  "src/services/focusDataLayer.ts",
+  "src/services/focusAlgorithm.ts",
+  "src/services/focusServing.ts",
+  "src/services/focusMovement.ts"
+]

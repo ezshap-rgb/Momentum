@@ -1,0 +1,1540 @@
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import {
+  MomentumBoardData,
+  AppSettings,
+  QuickJob,
+  QuickJobDuration,
+  Responsibility,
+  JobRecurrence,
+  Project,
+  Habit,
+  CalendarEvent,
+  PanelStates,
+  PanelLevel,
+  GeminiParsedData,
+  ResponsibilityStatus,
+  ProjectStatus,
+  LayoutMode,
+} from '../types';
+import { soundService } from '../services/soundService';
+import {
+  loadLocalBoardData,
+  saveLocalBoardData,
+  loadSettingsFromStorage,
+  saveSettingsToStorage,
+  subscribeToBoardData,
+  persistBoardData,
+  recordDeletedGoogleTaskId,
+  unrecordDeletedGoogleTaskId,
+  DEFAULT_INITIAL_DATA,
+  DEFAULT_SETTINGS,
+} from '../services/storageService';
+import {
+  getStoredAccessToken,
+  requestGoogleTasksAuth,
+  fetchAllGoogleTasks,
+  fetchGoogleAccountEmail,
+  ensureGoogleTaskLists,
+  syncTasksIntoBoard,
+  pushLocalTasksToGoogle,
+  clearStoredAccessToken,
+  markGoogleTaskCompleted,
+  deleteGoogleTask,
+  createGoogleTask,
+  fetchGoogleTasksFromWebhook,
+  markGoogleTaskCompletedViaWebhook,
+  deleteGoogleTaskViaWebhook,
+  createGoogleTaskViaWebhook,
+} from '../services/googleTasksService';
+
+interface MomentumContextType {
+  boardData: MomentumBoardData;
+  settings: AppSettings;
+  updateSettings: (newSettings: Partial<AppSettings>) => void;
+  toggleTheme: () => void;
+  layoutMode: LayoutMode;
+  toggleLayoutMode: () => void;
+  // Google Tasks
+  isSyncingTasks: boolean;
+  syncGoogleTasks: (
+    clientIdOverride?: string,
+    cleanOrphanedDemoTasks?: boolean
+  ) => Promise<{
+    success: boolean;
+    count: number;
+    pushedCount?: number;
+    removedCount?: number;
+    relocatedCount?: number;
+    error?: string;
+    errors?: string[];
+    accountEmail?: string;
+    listsSummary?: string;
+  }>;
+  disconnectGoogleTasks: () => void;
+  // Panel Levels
+  panelStates: PanelStates;
+  setPanelLevel: (panel: keyof Omit<PanelStates, 'calendar'>, level: PanelLevel) => void;
+  cyclePanelLevel: (panel: keyof Omit<PanelStates, 'calendar'>) => void;
+  setCalendarView: (view: 'hidden' | 'week' | 'month') => void;
+  // Quick jobs (Tasks)
+  addQuickJob: (title: string, duration?: QuickJobDuration, due?: string | null) => void;
+  toggleQuickJob: (id: string) => void;
+  deleteQuickJob: (id: string) => void;
+  editQuickJob: (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => void;
+  // Responsibilities (Jobs)
+  addResponsibility: (
+    title: string,
+    initialNextStep: string,
+    due?: string | null,
+    scheduledDate?: string | null,
+    scheduledTime?: string | null,
+    recurrence?: JobRecurrence | null,
+    recurrenceDay?: string | null
+  ) => void;
+  advanceResponsibilityStep: (id: string) => void;
+  regressResponsibilityStep: (id: string) => void;
+  resetResponsibilitySteps: (id: string) => void;
+  addStepToResponsibility: (id: string, stepText: string) => void;
+  updateResponsibilityDue: (id: string, due: string | null) => void;
+  setResponsibilityStatus: (id: string, status: ResponsibilityStatus) => void;
+  deleteResponsibility: (id: string) => void;
+  editResponsibility: (
+    id: string,
+    updates: {
+      title?: string;
+      currentStep?: string;
+      due?: string | null;
+      scheduledDate?: string | null;
+      scheduledTime?: string | null;
+      recurrence?: JobRecurrence | null;
+      recurrenceDay?: string | null;
+      steps?: string[];
+    }
+  ) => void;
+  // Projects
+  addProject: (name: string, current_position: string, next_step: string) => void;
+  updateProjectProgress: (
+    id: string,
+    note: string,
+    newNextStep?: string | null,
+    newPosition?: string | null,
+    newStatus?: ProjectStatus
+  ) => void;
+  setProjectStatus: (id: string, status: ProjectStatus) => void;
+  setFocusProject: (id: string | null) => void;
+  deleteProject: (id: string) => void;
+  completeProjectStep: (id: string, newNextStep?: string) => void;
+  editProject: (
+    id: string,
+    updates: {
+      name?: string;
+      current_position?: string;
+      next_step?: string;
+      status?: ProjectStatus;
+    }
+  ) => void;
+  // Habits
+  toggleHabitDate: (id: string, dateStr: string) => void;
+  setHabitDuration: (id: string, dateStr: string, minutes: number) => void;
+  addHabit: (name: string, type: 'boolean' | 'duration_min', target: number, nextDue?: string) => void;
+  deleteHabit: (id: string) => void;
+  editHabit: (
+    id: string,
+    updates: {
+      name?: string;
+      next_due?: string | null;
+      target?: number;
+    }
+  ) => void;
+  // Calendar Events
+  addCalendarEvent: (event: Omit<CalendarEvent, 'id'>) => void;
+  deleteCalendarEvent: (id: string) => void;
+  // Universal AI ingestion
+  applyGeminiParsedData: (data: GeminiParsedData) => void;
+  // Undo System
+  undo: () => void;
+  canUndo: boolean;
+  lastUndoMessage: string | null;
+  dismissUndoMessage: () => void;
+}
+
+const MomentumContext = createContext<MomentumContextType | undefined>(undefined);
+
+export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [settings, setSettings] = useState<AppSettings>(loadSettingsFromStorage);
+  const [boardData, setBoardData] = useState<MomentumBoardData>(loadLocalBoardData);
+
+  // Panel state levels: Default all 4 panels in 'compact' mode so everything fits without scrolling!
+  const [panelStates, setPanelStates] = useState<PanelStates>({
+    quick_jobs: 'compact',
+    responsibilities: 'compact',
+    projects: 'compact',
+    habits: 'compact',
+    calendar: 'hidden', // default to no calendar, opened with Calendar button
+  });
+
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
+    return (localStorage.getItem('momentum_layout_mode') as LayoutMode) || 'cockpit';
+  });
+
+  const toggleLayoutMode = useCallback(() => {
+    setLayoutMode((prev) => {
+      const next = prev === 'cockpit' ? 'widget' : 'cockpit';
+      localStorage.setItem('momentum_layout_mode', next);
+      return next;
+    });
+  }, []);
+
+  // Sync HTML dark class with settings.theme
+  useEffect(() => {
+    if (settings.theme === 'light') {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+      document.documentElement.classList.add('dark');
+    }
+  }, [settings.theme]);
+
+  // Sync / Subscription setup
+  useEffect(() => {
+    const unsubscribe = subscribeToBoardData(settings, (newData) => {
+      setBoardData(newData);
+    });
+    return () => unsubscribe();
+  }, [settings.useCloudSync, settings.firebaseConfig, settings.userBoardId]);
+
+  // Undo Stack (keeps last 30 snapshots)
+  const [undoStack, setUndoStack] = useState<{ data: MomentumBoardData; actionName?: string }[]>([]);
+  const [lastUndoMessage, setLastUndoMessage] = useState<string | null>(null);
+
+  const dismissUndoMessage = useCallback(() => {
+    setLastUndoMessage(null);
+  }, []);
+
+  // Auto-dismiss undo message after 7 seconds
+  useEffect(() => {
+    if (lastUndoMessage) {
+      const timer = setTimeout(() => {
+        setLastUndoMessage(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastUndoMessage]);
+
+  const updateBoard = useCallback(
+    (updater: (prev: MomentumBoardData) => MomentumBoardData, actionName?: string) => {
+      setBoardData((prev) => {
+        const next = updater(prev);
+        if (next !== prev) {
+          setUndoStack((stack) => [...stack.slice(-30), { data: prev, actionName }]);
+          if (actionName) {
+            setLastUndoMessage(actionName);
+          }
+        }
+        persistBoardData(next, settings);
+        return next;
+      });
+    },
+    [settings]
+  );
+
+  const undo = useCallback(() => {
+    setUndoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const last = stack[stack.length - 1];
+      const newStack = stack.slice(0, -1);
+
+      // Restore previous board data
+      setBoardData(last.data);
+      persistBoardData(last.data, settings);
+
+      // Unrecord deleted google task IDs so restored items stay synced
+      for (const job of last.data.quick_jobs) {
+        if (job.googleTaskId) unrecordDeletedGoogleTaskId(job.googleTaskId);
+      }
+      for (const resp of last.data.responsibilities) {
+        if (resp.googleTaskId) unrecordDeletedGoogleTaskId(resp.googleTaskId);
+      }
+      for (const proj of last.data.projects) {
+        if (proj.googleTaskId) unrecordDeletedGoogleTaskId(proj.googleTaskId);
+      }
+      for (const hab of last.data.habits) {
+        if (hab.googleTaskId) unrecordDeletedGoogleTaskId(hab.googleTaskId);
+      }
+
+      soundService.playSuccessChime();
+      setLastUndoMessage(last.actionName ? `Recovered: ${last.actionName}` : 'Recovered previous state');
+      return newStack;
+    });
+  }, [settings]);
+
+  // Global Ctrl+Z / Cmd+Z shortcut (unless focused inside a text input/textarea)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        if (!isInput) {
+          e.preventDefault();
+          undo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo]);
+
+  const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
+    setSettings((prev) => {
+      const merged = { ...prev, ...newSettings };
+      saveSettingsToStorage(merged);
+      return merged;
+    });
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    localStorage.setItem('momentum_explicit_theme_v1', 'true');
+    updateSettings({
+      theme: settings.theme === 'dark' ? 'light' : 'dark',
+    });
+  }, [settings.theme, updateSettings]);
+
+  // Panel level management
+  const setPanelLevel = useCallback(
+    (panel: keyof Omit<PanelStates, 'calendar'>, level: PanelLevel) => {
+      setPanelStates((prev) => ({
+        ...prev,
+        [panel]: level,
+      }));
+    },
+    []
+  );
+
+  const cyclePanelLevel = useCallback((panel: keyof Omit<PanelStates, 'calendar'>) => {
+    setPanelStates((prev) => {
+      const current = prev[panel];
+      const nextLevel: PanelLevel =
+        current === 'collapsed'
+          ? 'compact'
+          : current === 'compact'
+          ? 'expanded'
+          : 'collapsed';
+      return { ...prev, [panel]: nextLevel };
+    });
+  }, []);
+
+  const setCalendarView = useCallback((view: 'hidden' | 'week' | 'month') => {
+    setPanelStates((prev) => ({
+      ...prev,
+      calendar: view,
+    }));
+  }, []);
+
+  // Quick Jobs
+  const addQuickJob = useCallback(
+    (title: string, duration?: QuickJobDuration, due?: string | null) => {
+      if (!title.trim()) return;
+      const cleanTitle = title.trim();
+      const jobDuration = duration || '5m';
+      const jobId = `qj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const newJob: QuickJob = {
+        id: jobId,
+        title: cleanTitle,
+        duration: jobDuration,
+        due: due || null,
+        done: false,
+        createdAt: Date.now(),
+      };
+      updateBoard((prev) => ({
+        ...prev,
+        quick_jobs: [newJob, ...prev.quick_jobs],
+      }));
+
+      // Background push to Google Tasks (Webhook or OAuth)
+      if (settings.googleTasksWebhookUrl) {
+        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `[${jobDuration}] ${cleanTitle}`).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
+            }));
+          }
+        });
+      } else {
+        const token = getStoredAccessToken();
+        if (token && settings.googleTasksConnected) {
+          const listId = settings.googleTaskListsMap?.tasksListId || settings.googleTaskListsMap?.quickJobsListId || '@default';
+          createGoogleTask(token, listId, `Task: ${cleanTitle} [${jobDuration}]`).then((taskId) => {
+            if (taskId) {
+              updateBoard((prev) => ({
+                ...prev,
+                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId, googleTaskListId: listId } : j)),
+              }));
+            }
+          });
+        }
+      }
+    },
+    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap]
+  );
+
+  const editQuickJob = useCallback(
+    (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => {
+      updateBoard((prev) => ({
+        ...prev,
+        quick_jobs: prev.quick_jobs.map((j) => {
+          if (j.id !== id) return j;
+          return {
+            ...j,
+            title: updates.title !== undefined ? updates.title.trim() : j.title,
+            duration: updates.duration || j.duration,
+            due: updates.due !== undefined ? updates.due : j.due,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const toggleQuickJob = useCallback(
+    (id: string) => {
+      let actionDesc = '';
+      updateBoard((prev) => {
+        const target = prev.quick_jobs.find((j) => j.id === id);
+        const willBeDone = target ? !target.done : false;
+        actionDesc = target
+          ? willBeDone
+            ? `Task "${target.title}" completed`
+            : `Task "${target.title}" reopened`
+          : 'Task updated';
+
+        if (target && willBeDone) {
+          soundService.playSuccessChime();
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              markGoogleTaskCompletedViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                markGoogleTaskCompleted(token, target.googleTaskListId || '@default', target.googleTaskId);
+              }
+            }
+          }
+        }
+        return {
+          ...prev,
+          quick_jobs: prev.quick_jobs.map((j) =>
+            j.id === id ? { ...j, done: willBeDone } : j
+          ),
+        };
+      }, actionDesc || 'Task updated');
+    },
+    [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  const deleteQuickJob = useCallback(
+    (id: string) => {
+      let taskTitle = '';
+      updateBoard((prev) => {
+        const target = prev.quick_jobs.find((j) => j.id === id);
+        taskTitle = target ? target.title : 'Task';
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
+              }
+            }
+          }
+        }
+        return {
+          ...prev,
+          quick_jobs: prev.quick_jobs.filter((j) => j.id !== id),
+        };
+      }, `Task "${taskTitle || 'Task'}" deleted`);
+    },
+    [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  // Responsibilities
+  const addResponsibility = useCallback(
+    (
+      title: string,
+      initialNextStep: string,
+      due?: string | null,
+      scheduledDate?: string | null,
+      scheduledTime?: string | null,
+      recurrence?: JobRecurrence | null,
+      recurrenceDay?: string | null
+    ) => {
+      if (!title.trim()) return;
+      let computedDue = due || null;
+      if (!computedDue && (scheduledDate || scheduledTime || recurrence)) {
+        const timePart = scheduledTime ? ` ${scheduledTime}` : '';
+        if (recurrence && recurrence !== 'none') {
+          const dayPart = recurrenceDay ? `${recurrenceDay}` : 'Weekly';
+          computedDue = `🔁 ${dayPart}${timePart}`;
+        } else if (scheduledDate) {
+          computedDue = `${scheduledDate}${timePart}`;
+        }
+      }
+
+      const newResp: Responsibility = {
+        id: `resp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        title: title.trim(),
+        steps: initialNextStep.trim() ? [initialNextStep.trim()] : ['First actionable step'],
+        current_step_index: 0,
+        due: computedDue,
+        scheduledDate: scheduledDate || null,
+        scheduledTime: scheduledTime || null,
+        recurrence: recurrence || null,
+        recurrenceDay: recurrenceDay || null,
+        status: 'active',
+        createdAt: Date.now(),
+      };
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: [newResp, ...prev.responsibilities],
+      }));
+
+      // Background push to Google Tasks
+      const token = getStoredAccessToken();
+      if (token && settings.googleTasksConnected) {
+        const listId = settings.googleTaskListsMap?.jobsListId || settings.googleTaskListsMap?.responsibilitiesListId || '@default';
+        const taskTitle = `Job: ${newResp.title} -> ${newResp.steps[0]}`;
+        createGoogleTask(token, listId, taskTitle).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              responsibilities: prev.responsibilities.map((r) =>
+                r.id === newResp.id ? { ...r, googleTaskId: taskId, googleTaskListId: listId } : r
+              ),
+            }));
+          }
+        });
+      }
+    },
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
+  );
+
+  const advanceResponsibilityStep = useCallback(
+    (id: string) => {
+      soundService.playSuccessChime();
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          const nextIndex = r.current_step_index + 1;
+          const isDone = nextIndex >= r.steps.length;
+
+          // If recurring weekly (or recurring in general), automatically reset steps and advance scheduled date!
+          if (isDone && r.recurrence && r.recurrence !== 'none') {
+            let nextDateStr = r.scheduledDate || null;
+            if (r.scheduledDate) {
+              const d = new Date(r.scheduledDate + 'T00:00:00');
+              const daysToAdd = r.recurrence === 'weekly' ? 7 : r.recurrence === 'biweekly' ? 14 : r.recurrence === 'daily' ? 1 : 30;
+              d.setDate(d.getDate() + daysToAdd);
+              nextDateStr = d.toISOString().split('T')[0];
+            } else if (r.recurrenceDay) {
+              const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              const targetDayIdx = daysOfWeek.findIndex((d) => d.toLowerCase() === r.recurrenceDay?.toLowerCase());
+              if (targetDayIdx !== -1) {
+                const now = new Date();
+                const currentDayIdx = now.getDay();
+                let diff = (targetDayIdx - currentDayIdx + 7) % 7;
+                if (diff === 0) diff = 7;
+                now.setDate(now.getDate() + diff);
+                nextDateStr = now.toISOString().split('T')[0];
+              }
+            }
+
+            const timeStr = r.scheduledTime ? ` ${r.scheduledTime}` : '';
+            const dayStr = r.recurrenceDay ? `${r.recurrenceDay}` : 'Weekly';
+            const updatedDue = `🔁 ${dayStr}${timeStr} (Resets weekly)`;
+
+            return {
+              ...r,
+              current_step_index: 0,
+              status: 'active',
+              scheduledDate: nextDateStr,
+              due: updatedDue,
+              lastCompletedAt: Date.now(),
+            };
+          }
+
+          if (isDone && r.googleTaskId) {
+            recordDeletedGoogleTaskId(r.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              markGoogleTaskCompletedViaWebhook(settings.googleTasksWebhookUrl, r.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                markGoogleTaskCompleted(token, r.googleTaskListId || '@default', r.googleTaskId);
+              }
+            }
+          }
+          return {
+            ...r,
+            current_step_index: nextIndex,
+            status: isDone ? 'done' : r.status,
+          };
+        }),
+      }));
+    },
+    [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  const regressResponsibilityStep = useCallback(
+    (id: string) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          const prevIndex = Math.max(0, r.current_step_index - 1);
+          return {
+            ...r,
+            current_step_index: prevIndex,
+            status: 'active',
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const resetResponsibilitySteps = useCallback(
+    (id: string) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          return {
+            ...r,
+            current_step_index: 0,
+            status: 'active',
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const addStepToResponsibility = useCallback(
+    (id: string, stepText: string) => {
+      if (!stepText.trim()) return;
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          return {
+            ...r,
+            steps: [...r.steps, stepText.trim()],
+            status: r.status === 'done' ? 'active' : r.status,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const updateResponsibilityDue = useCallback(
+    (id: string, due: string | null) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) =>
+          r.id === id ? { ...r, due } : r
+        ),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const setResponsibilityStatus = useCallback(
+    (id: string, status: ResponsibilityStatus) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) =>
+          r.id === id ? { ...r, status } : r
+        ),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const deleteResponsibility = useCallback(
+    (id: string) => {
+      let respTitle = '';
+      updateBoard((prev) => {
+        const target = prev.responsibilities.find((r) => r.id === id);
+        respTitle = target ? target.title : 'Job';
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
+              }
+            }
+          }
+        }
+        return {
+          ...prev,
+          responsibilities: prev.responsibilities.filter((r) => r.id !== id),
+        };
+      }, `Job "${respTitle || 'Job'}" deleted`);
+    },
+    [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  const editResponsibility = useCallback(
+    (
+      id: string,
+      updates: {
+        title?: string;
+        currentStep?: string;
+        due?: string | null;
+        scheduledDate?: string | null;
+        scheduledTime?: string | null;
+        recurrence?: JobRecurrence | null;
+        recurrenceDay?: string | null;
+        steps?: string[];
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        responsibilities: prev.responsibilities.map((r) => {
+          if (r.id !== id) return r;
+          let newSteps = updates.steps ? [...updates.steps] : [...r.steps];
+          if (updates.currentStep && updates.currentStep.trim()) {
+            newSteps[r.current_step_index] = updates.currentStep.trim();
+          }
+          return {
+            ...r,
+            title: updates.title !== undefined ? updates.title.trim() : r.title,
+            due: updates.due !== undefined ? updates.due : r.due,
+            scheduledDate: updates.scheduledDate !== undefined ? updates.scheduledDate : r.scheduledDate,
+            scheduledTime: updates.scheduledTime !== undefined ? updates.scheduledTime : r.scheduledTime,
+            recurrence: updates.recurrence !== undefined ? updates.recurrence : r.recurrence,
+            recurrenceDay: updates.recurrenceDay !== undefined ? updates.recurrenceDay : r.recurrenceDay,
+            steps: newSteps,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  // Projects
+  const addProject = useCallback(
+    (name: string, current_position: string, next_step: string) => {
+      if (!name.trim()) return;
+      const newProj: Project = {
+        id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: name.trim(),
+        status: 'moving',
+        current_position: current_position.trim() || 'Project started.',
+        next_step: next_step.trim() || 'Define first milestone.',
+        last_updated: Date.now(),
+        review_interval_days: 7,
+        history: [
+          {
+            timestamp: Date.now(),
+            note: current_position.trim() || 'Project initiated.',
+            next_step: next_step.trim() || 'Define first milestone.',
+          },
+        ],
+      };
+      updateBoard((prev) => ({
+        ...prev,
+        projects: [newProj, ...prev.projects],
+      }));
+
+      // Background push to Google Tasks
+      const token = getStoredAccessToken();
+      if (token && settings.googleTasksConnected) {
+        const listId = settings.googleTaskListsMap?.projectsListId || '@default';
+        const taskTitle = `Project: ${newProj.name} | Next: ${newProj.next_step}`;
+        createGoogleTask(token, listId, taskTitle).then((taskId) => {
+          if (taskId) {
+            updateBoard((prev) => ({
+              ...prev,
+              projects: prev.projects.map((p) =>
+                p.id === newProj.id ? { ...p, googleTaskId: taskId, googleTaskListId: listId } : p
+              ),
+            }));
+          }
+        });
+      }
+    },
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
+  );
+
+  const updateProjectProgress = useCallback(
+    (
+      id: string,
+      note: string,
+      newNextStep?: string | null,
+      newPosition?: string | null,
+      newStatus?: ProjectStatus
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) => {
+          if (p.id !== id) return p;
+          const nextStepVal =
+            newNextStep !== undefined && newNextStep !== null && newNextStep.trim() !== ''
+              ? newNextStep.trim()
+              : p.next_step;
+          const currentPosVal =
+            newPosition !== undefined && newPosition !== null && newPosition.trim() !== ''
+              ? newPosition.trim()
+              : note.trim()
+              ? note.trim()
+              : p.current_position;
+
+          const historyEntry = note.trim()
+            ? [{ timestamp: Date.now(), note: note.trim(), next_step: nextStepVal }]
+            : [];
+
+          return {
+            ...p,
+            current_position: currentPosVal,
+            next_step: nextStepVal,
+            last_updated: Date.now(),
+            status: newStatus || 'moving',
+            history: [...p.history, ...historyEntry],
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const setProjectStatus = useCallback(
+    (id: string, status: ProjectStatus) => {
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) =>
+          p.id === id ? { ...p, status, last_updated: Date.now() } : p
+        ),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const setFocusProject = useCallback(
+    (id: string | null) => {
+      updateBoard((prev) => ({
+        ...prev,
+        current_focus_project_id: id,
+      }));
+    },
+    [updateBoard]
+  );
+
+  const deleteProject = useCallback(
+    (id: string) => {
+      let projName = '';
+      updateBoard((prev) => {
+        const target = prev.projects.find((p) => p.id === id);
+        projName = target ? target.name : 'Project';
+        if (target) {
+          if (target.googleTaskId) {
+            recordDeletedGoogleTaskId(target.googleTaskId);
+            if (settings.googleTasksWebhookUrl) {
+              deleteGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, target.googleTaskId);
+            } else {
+              const token = getStoredAccessToken();
+              if (token) {
+                deleteGoogleTask(token, target.googleTaskListId || '@default', target.googleTaskId);
+              }
+            }
+          }
+        }
+        return {
+          ...prev,
+          projects: prev.projects.filter((p) => p.id !== id),
+          current_focus_project_id:
+            prev.current_focus_project_id === id ? null : prev.current_focus_project_id,
+        };
+      }, `Project "${projName || 'Project'}" deleted`);
+    },
+    [updateBoard, settings.googleTasksWebhookUrl]
+  );
+
+  const completeProjectStep = useCallback(
+    (id: string, newNextStep?: string) => {
+      soundService.playSuccessChime();
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) => {
+          if (p.id !== id) return p;
+          const completedStep = p.next_step;
+          let nextStepVal = '';
+          const remainingUpcoming = p.upcoming_steps ? [...p.upcoming_steps] : [];
+
+          if (newNextStep !== undefined && newNextStep.trim()) {
+            nextStepVal = newNextStep.trim();
+          } else if (remainingUpcoming.length > 0) {
+            nextStepVal = remainingUpcoming.shift()!;
+          } else {
+            nextStepVal = 'Define next milestone';
+          }
+
+          const historyEntry = {
+            timestamp: Date.now(),
+            note: `Completed step: ${completedStep}`,
+            next_step: nextStepVal,
+          };
+
+          const updatedPosition = p.current_position
+            ? `${p.current_position} • Completed: ${completedStep}`
+            : `Completed: ${completedStep}`;
+
+          return {
+            ...p,
+            next_step: nextStepVal,
+            upcoming_steps: remainingUpcoming,
+            current_position: updatedPosition,
+            last_updated: Date.now(),
+            history: [...p.history, historyEntry],
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const editProject = useCallback(
+    (
+      id: string,
+      updates: {
+        name?: string;
+        current_position?: string;
+        next_step?: string;
+        status?: ProjectStatus;
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) => {
+          if (p.id !== id) return p;
+          return {
+            ...p,
+            name: updates.name !== undefined ? updates.name.trim() : p.name,
+            current_position:
+              updates.current_position !== undefined ? updates.current_position.trim() : p.current_position,
+            next_step: updates.next_step !== undefined ? updates.next_step.trim() : p.next_step,
+            status: updates.status || p.status,
+            last_updated: Date.now(),
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  // Habits
+  const toggleHabitDate = useCallback(
+    (id: string, dateStr: string) => {
+      updateBoard((prev) => ({
+        ...prev,
+        habits: prev.habits.map((h) => {
+          if (h.id !== id) return h;
+          const currentVal = !!h.log[dateStr];
+          return {
+            ...h,
+            log: {
+              ...h.log,
+              [dateStr]: !currentVal,
+            },
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const setHabitDuration = useCallback(
+    (id: string, dateStr: string, minutes: number) => {
+      updateBoard((prev) => ({
+        ...prev,
+        habits: prev.habits.map((h) => {
+          if (h.id !== id) return h;
+          return {
+            ...h,
+            log: {
+              ...h.log,
+              [dateStr]: Math.max(0, minutes),
+            },
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  const addHabit = useCallback(
+    (name: string, type: 'boolean' | 'duration_min', target: number, nextDue?: string) => {
+      if (!name.trim()) return;
+      const newHabit: Habit = {
+        id: `hab-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: name.trim(),
+        type,
+        target,
+        next_due: nextDue || 'Today',
+        log: {},
+      };
+      updateBoard((prev) => ({
+        ...prev,
+        habits: [...prev.habits, newHabit],
+      }));
+    },
+    [updateBoard]
+  );
+
+  const deleteHabit = useCallback(
+    (id: string) => {
+      let habitName = '';
+      updateBoard((prev) => {
+        const target = prev.habits.find((h) => h.id === id);
+        habitName = target ? target.name : 'Habit';
+        return {
+          ...prev,
+          habits: prev.habits.filter((h) => h.id !== id),
+        };
+      }, `Habit "${habitName || 'Habit'}" deleted`);
+    },
+    [updateBoard]
+  );
+
+  const editHabit = useCallback(
+    (
+      id: string,
+      updates: {
+        name?: string;
+        next_due?: string | null;
+        target?: number;
+      }
+    ) => {
+      updateBoard((prev) => ({
+        ...prev,
+        habits: prev.habits.map((h) => {
+          if (h.id !== id) return h;
+          return {
+            ...h,
+            name: updates.name !== undefined ? updates.name.trim() : h.name,
+            next_due: updates.next_due !== undefined ? updates.next_due : h.next_due,
+            target: updates.target !== undefined ? updates.target : h.target,
+          };
+        }),
+      }));
+    },
+    [updateBoard]
+  );
+
+  // Calendar
+  const addCalendarEvent = useCallback(
+    (event: Omit<CalendarEvent, 'id'>) => {
+      const newEvt: CalendarEvent = {
+        ...event,
+        id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      };
+      updateBoard((prev) => ({
+        ...prev,
+        calendar_events: [...(prev.calendar_events || []), newEvt],
+      }));
+    },
+    [updateBoard]
+  );
+
+  const deleteCalendarEvent = useCallback(
+    (id: string) => {
+      updateBoard((prev) => ({
+        ...prev,
+        calendar_events: (prev.calendar_events || []).filter((e) => e.id !== id),
+      }));
+    },
+    [updateBoard]
+  );
+
+  // Apply parsed Gemini extraction
+  const applyGeminiParsedData = useCallback(
+    (data: GeminiParsedData) => {
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      updateBoard((prev) => {
+        let updatedQuickJobs = [...prev.quick_jobs];
+        let updatedResponsibilities = [...prev.responsibilities];
+        let updatedProjects = [...prev.projects];
+        let updatedHabits = [...prev.habits];
+
+        if (data.quick_jobs && data.quick_jobs.length > 0) {
+          const newJobs: QuickJob[] = data.quick_jobs.map((item, idx) => ({
+            id: `qj-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+            title: item.title,
+            duration: item.duration || '5m',
+            due: item.due || null,
+            done: false,
+            createdAt: Date.now(),
+          }));
+          updatedQuickJobs = [...newJobs, ...updatedQuickJobs];
+        }
+
+        if (data.responsibilities && data.responsibilities.length > 0) {
+          data.responsibilities.forEach((item, idx) => {
+            const existingIdx = updatedResponsibilities.findIndex(
+              (r) => r.title.toLowerCase() === item.title.toLowerCase()
+            );
+            if (existingIdx >= 0) {
+              const resp = updatedResponsibilities[existingIdx];
+              updatedResponsibilities[existingIdx] = {
+                ...resp,
+                steps: [...resp.steps, item.next_action],
+                due: item.due || resp.due,
+                status: 'active',
+              };
+            } else {
+              updatedResponsibilities.unshift({
+                id: `resp-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+                title: item.title,
+                steps: [item.next_action],
+                current_step_index: 0,
+                due: item.due || null,
+                status: 'active',
+                createdAt: Date.now(),
+              });
+            }
+          });
+        }
+
+        if (data.project_updates && data.project_updates.length > 0) {
+          data.project_updates.forEach((item, idx) => {
+            const existingIdx = updatedProjects.findIndex(
+              (p) =>
+                p.name.toLowerCase().includes(item.project_name.toLowerCase()) ||
+                item.project_name.toLowerCase().includes(p.name.toLowerCase())
+            );
+
+            if (existingIdx >= 0) {
+              const p = updatedProjects[existingIdx];
+              const nextStep = item.new_next_step || p.next_step;
+              updatedProjects[existingIdx] = {
+                ...p,
+                current_position: item.update_note || p.current_position,
+                next_step: nextStep,
+                last_updated: Date.now(),
+                status: 'moving',
+                history: [
+                  ...p.history,
+                  {
+                    timestamp: Date.now(),
+                    note: item.update_note,
+                    next_step: nextStep,
+                  },
+                ],
+              };
+            } else {
+              updatedProjects.unshift({
+                id: `proj-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+                name: item.project_name,
+                status: 'moving',
+                current_position: item.update_note || 'Initiated via brain dump.',
+                next_step: item.new_next_step || 'Define first action.',
+                last_updated: Date.now(),
+                review_interval_days: 7,
+                history: [
+                  {
+                    timestamp: Date.now(),
+                    note: item.update_note || 'Initiated via voice ingestion.',
+                    next_step: item.new_next_step || 'Define first action.',
+                  },
+                ],
+              });
+            }
+          });
+        }
+
+        if (data.habits && data.habits.length > 0) {
+          data.habits.forEach((item) => {
+            const existingIdx = updatedHabits.findIndex(
+              (h) =>
+                h.name.toLowerCase().includes(item.name.toLowerCase()) ||
+                item.name.toLowerCase().includes(h.name.toLowerCase())
+            );
+            if (existingIdx >= 0) {
+              const h = updatedHabits[existingIdx];
+              updatedHabits[existingIdx] = {
+                ...h,
+                log: {
+                  ...h.log,
+                  [todayStr]: item.value,
+                },
+              };
+            }
+          });
+        }
+
+        return {
+          ...prev,
+          quick_jobs: updatedQuickJobs,
+          responsibilities: updatedResponsibilities,
+          projects: updatedProjects,
+          habits: updatedHabits,
+        };
+      });
+    },
+    [updateBoard]
+  );
+
+  // Google Tasks Synchronization
+  const [isSyncingTasks, setIsSyncingTasks] = useState(false);
+
+  // Auto-reset safety timer: never let isSyncingTasks get stuck in infinite spin
+  useEffect(() => {
+    if (isSyncingTasks) {
+      const timer = setTimeout(() => {
+        setIsSyncingTasks(false);
+      }, 25000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSyncingTasks]);
+
+  const syncGoogleTasks = useCallback(
+    async (
+      clientIdOverride?: string,
+      cleanOrphanedDemoTasks = false
+    ): Promise<{
+      success: boolean;
+      count: number;
+      pushedCount?: number;
+      removedCount?: number;
+      relocatedCount?: number;
+      error?: string;
+      errors?: string[];
+      accountEmail?: string;
+      listsSummary?: string;
+    }> => {
+      // 1. If Webhook Relay is configured: 100% Zero-Login Permanent Sync!
+      if (settings.googleTasksWebhookUrl) {
+        setIsSyncingTasks(true);
+        try {
+          const taskLists = await fetchGoogleTasksFromWebhook(settings.googleTasksWebhookUrl);
+          let totalAdded = 0;
+          let totalRemoved = 0;
+
+          updateBoard((prev) => {
+            const result = syncTasksIntoBoard(prev, taskLists, cleanOrphanedDemoTasks);
+            totalAdded = result.totalSynced;
+            totalRemoved = result.removedTasks;
+            return result.updatedBoard;
+          });
+
+          if (totalAdded > 0 || totalRemoved > 0) {
+            soundService.playSuccessChime();
+          }
+
+          updateSettings({
+            googleTasksConnected: true,
+            googleTasksLastSync: Date.now(),
+          });
+
+          return { success: true, count: totalAdded, removedCount: totalRemoved };
+        } catch (err: any) {
+          return {
+            success: false,
+            count: 0,
+            error: err?.message || 'Failed to sync via Google Tasks Webhook Relay.',
+          };
+        } finally {
+          setIsSyncingTasks(false);
+        }
+      }
+
+      // 2. Standard Google Identity Services OAuth
+      const clientId = clientIdOverride || settings.googleTasksClientId;
+      if (!clientId) {
+        return {
+          success: false,
+          count: 0,
+          error: 'Please enter your Google OAuth Client ID in Settings first.',
+        };
+      }
+
+      setIsSyncingTasks(true);
+      try {
+        let token = getStoredAccessToken();
+        if (!token) {
+          token = await requestGoogleTasksAuth(clientId, false, settings.googleTasksEmail);
+        }
+
+        // Successfully authenticated with Google
+        updateSettings({
+          googleTasksClientId: clientId,
+          googleTasksConnected: true,
+        });
+
+        // 1. Ensure the 4 dedicated lists exist in user's Google Tasks account (Quick Jobs, Responsibilities, Projects, Habits)
+        let dedicatedLists = settings.googleTaskListsMap;
+        try {
+          dedicatedLists = await ensureGoogleTaskLists(token);
+        } catch (e) {
+          console.warn('Could not auto-create dedicated Google Task lists, using default list:', e);
+        }
+
+        // 2. Fetch user's task lists and detected email
+        const [taskLists, detectedEmail] = await Promise.all([
+          fetchAllGoogleTasks(token),
+          fetchGoogleAccountEmail(token),
+        ]);
+        const primaryListId = taskLists[0]?.listId || '@default';
+
+        // 3. Read latest board data directly from storage (bypasses any stale closure)
+        const currentBoard = loadLocalBoardData();
+
+        const newlyCreatedTaskIds = new Set<string>();
+
+        // 4. PUSH PHASE: Upload any un-synced local tasks directly into their dedicated lists
+        let totalPushed = 0;
+        let pushErrors: string[] = [];
+        let boardAfterPush = currentBoard;
+        try {
+          const pushRes = await pushLocalTasksToGoogle(token, currentBoard, dedicatedLists || primaryListId);
+          pushErrors = pushRes.errors || [];
+          if (pushRes.pushedCount > 0) {
+            totalPushed = pushRes.pushedCount;
+            boardAfterPush = pushRes.updatedBoard;
+            saveLocalBoardData(boardAfterPush);
+            (pushRes.pushedTaskIds || []).forEach((id) => newlyCreatedTaskIds.add(id));
+          }
+        } catch (pushErr: any) {
+          pushErrors.push(pushErr?.message || String(pushErr));
+        }
+
+        // 5. If we pushed tasks, re-fetch active tasks from Google so reconciliation gets the exact latest state
+        let activeTaskLists = taskLists;
+        if (totalPushed > 0) {
+          try {
+            activeTaskLists = await fetchAllGoogleTasks(token);
+          } catch {}
+        }
+
+        const listsSummary = activeTaskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', ');
+        let totalAdded = 0;
+        let totalRemoved = 0;
+
+        const result = syncTasksIntoBoard(boardAfterPush, activeTaskLists, cleanOrphanedDemoTasks, newlyCreatedTaskIds, dedicatedLists);
+        totalAdded = result.totalSynced;
+        totalRemoved = result.removedTasks;
+        let finalBoard = result.updatedBoard;
+
+        // Auto-Triage: Relocate tasks sitting in default/main list into their dedicated lists in Google Tasks!
+        let relocatedCount = 0;
+        const relocationErrors: string[] = [];
+
+        if (result.tasksToRelocate && result.tasksToRelocate.length > 0) {
+          for (const item of result.tasksToRelocate) {
+            try {
+              const newId = await createGoogleTask(token, item.targetListId, item.title, item.notes);
+              if (newId) {
+                await deleteGoogleTask(token, item.sourceListId, item.task.id);
+                recordDeletedGoogleTaskId(item.task.id);
+                relocatedCount++;
+
+                // Update board item with new googleTaskId and googleTaskListId
+                if (item.momentumType === 'quick') {
+                  finalBoard = {
+                    ...finalBoard,
+                    quick_jobs: finalBoard.quick_jobs.map((j) =>
+                      j.googleTaskId === item.task.id ? { ...j, googleTaskId: newId, googleTaskListId: item.targetListId } : j
+                    ),
+                  };
+                } else if (item.momentumType === 'resp') {
+                  finalBoard = {
+                    ...finalBoard,
+                    responsibilities: finalBoard.responsibilities.map((r) =>
+                      r.googleTaskId === item.task.id ? { ...r, googleTaskId: newId, googleTaskListId: item.targetListId } : r
+                    ),
+                  };
+                } else if (item.momentumType === 'proj') {
+                  finalBoard = {
+                    ...finalBoard,
+                    projects: finalBoard.projects.map((p) =>
+                      p.googleTaskId === item.task.id ? { ...p, googleTaskId: newId, googleTaskListId: item.targetListId } : p
+                    ),
+                  };
+                } else if (item.momentumType === 'habit') {
+                  finalBoard = {
+                    ...finalBoard,
+                    habits: finalBoard.habits.map((h) =>
+                      h.googleTaskId === item.task.id ? { ...h, googleTaskId: newId, googleTaskListId: item.targetListId } : h
+                    ),
+                  };
+                }
+              }
+            } catch (relocateErr: any) {
+              const msg = relocateErr?.message || String(relocateErr);
+              console.error('Failed to relocate task across Google Task lists:', item.title, msg);
+              relocationErrors.push(`Relocate "${item.title}": ${msg}`);
+            }
+          }
+          saveLocalBoardData(finalBoard);
+        }
+
+        updateBoard(() => finalBoard);
+
+        if (totalAdded > 0 || totalRemoved > 0 || totalPushed > 0 || relocatedCount > 0) {
+          soundService.playSuccessChime();
+        }
+
+        // If tasks were relocated, refresh task lists so summary and active counts are fresh
+        if (relocatedCount > 0) {
+          try {
+            activeTaskLists = await fetchAllGoogleTasks(token);
+          } catch {}
+        }
+
+        const effectiveEmail = detectedEmail || settings.googleTasksEmail || '';
+
+        updateSettings({
+          googleTasksConnected: true,
+          googleTasksLastSync: Date.now(),
+          googleTasksAccountEmail: effectiveEmail,
+          googleTasksSyncedLists: activeTaskLists.map((l) => `${l.listTitle}: ${l.tasks.length} active`),
+          googleTaskListsMap: dedicatedLists,
+        });
+
+        const combinedErrors = [...pushErrors, ...relocationErrors];
+
+        return {
+          success: true,
+          count: totalAdded,
+          pushedCount: totalPushed,
+          removedCount: totalRemoved,
+          relocatedCount,
+          accountEmail: effectiveEmail,
+          listsSummary: activeTaskLists.map((l) => `${l.listTitle} (${l.tasks.length})`).join(', '),
+          errors: combinedErrors.length > 0 ? combinedErrors : undefined,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          count: 0,
+          error: err?.message || 'Failed to sync Google Tasks.',
+        };
+      } finally {
+        setIsSyncingTasks(false);
+      }
+    },
+    [settings.googleTasksClientId, settings.googleTasksWebhookUrl, settings.googleTasksEmail, updateBoard, updateSettings]
+  );
+
+  const disconnectGoogleTasks = useCallback(() => {
+    clearStoredAccessToken();
+    updateSettings({
+      googleTasksConnected: false,
+      googleTasksLastSync: undefined,
+    });
+  }, [updateSettings]);
+
+  // Auto-sync Google Tasks every 5 minutes if enabled
+  useEffect(() => {
+    if (!settings.googleTasksAutoSync) return;
+
+    // Webhook mode: always safe to auto-sync in background without logins
+    if (settings.googleTasksWebhookUrl) {
+      const interval = setInterval(() => {
+        syncGoogleTasks();
+      }, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+
+    // OAuth mode: only sync if we have a valid cached token so background timer NEVER pops up OAuth
+    if (settings.googleTasksConnected && settings.googleTasksClientId) {
+      const interval = setInterval(() => {
+        const token = getStoredAccessToken();
+        if (token) {
+          syncGoogleTasks();
+        }
+      }, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [
+    settings.googleTasksConnected,
+    settings.googleTasksAutoSync,
+    settings.googleTasksClientId,
+    settings.googleTasksWebhookUrl,
+    syncGoogleTasks,
+  ]);
+
+  return (
+    <MomentumContext.Provider
+      value={{
+        boardData,
+        settings,
+        updateSettings,
+        toggleTheme,
+        layoutMode,
+        toggleLayoutMode,
+        isSyncingTasks,
+        syncGoogleTasks,
+        disconnectGoogleTasks,
+        panelStates,
+        setPanelLevel,
+        cyclePanelLevel,
+        setCalendarView,
+        addQuickJob,
+        toggleQuickJob,
+        deleteQuickJob,
+        editQuickJob,
+        addResponsibility,
+        advanceResponsibilityStep,
+        regressResponsibilityStep,
+        resetResponsibilitySteps,
+        addStepToResponsibility,
+        updateResponsibilityDue,
+        setResponsibilityStatus,
+        deleteResponsibility,
+        editResponsibility,
+        addProject,
+        updateProjectProgress,
+        setProjectStatus,
+        setFocusProject,
+        deleteProject,
+        completeProjectStep,
+        editProject,
+        toggleHabitDate,
+        setHabitDuration,
+        addHabit,
+        deleteHabit,
+        editHabit,
+        addCalendarEvent,
+        deleteCalendarEvent,
+        applyGeminiParsedData,
+        undo,
+        canUndo: undoStack.length > 0,
+        lastUndoMessage,
+        dismissUndoMessage,
+      }}
+    >
+      {children}
+    </MomentumContext.Provider>
+  );
+};
+
+export const useMomentum = () => {
+  const context = useContext(MomentumContext);
+  if (!context) {
+    throw new Error('useMomentum must be used within a MomentumProvider');
+  }
+  return context;
+};

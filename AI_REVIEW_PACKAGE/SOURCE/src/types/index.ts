@@ -1,0 +1,139 @@
+export type QuickJobDuration = '1m' | '5m' | '15m';
+
+export interface QuickJob {
+  id: string;
+  title: string;
+  due?: string | null;
+  duration?: QuickJobDuration;
+  done: boolean;
+  createdAt: number;
+  googleTaskId?: string;
+  googleTaskListId?: string;
+}
+
+export type ResponsibilityStatus = 'active' | 'waiting' | 'paused' | 'done';
+export type JobRecurrence = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
+export interface Responsibility {
+  id: string;
+  title: string;
+  steps: string[];
+  current_step_index: number;
+  due?: string | null;
+  scheduledDate?: string | null; // e.g. "2026-11-17"
+  scheduledTime?: string | null; // e.g. "14:00"
+  recurrence?: JobRecurrence | null;
+  recurrenceDay?: string | null; // e.g. "Tuesday"
+  lastCompletedAt?: number | null;
+  status: ResponsibilityStatus;
+  createdAt: number;
+  googleTaskId?: string;
+  googleTaskListId?: string;
+}
+
+export type ProjectStatus = 'moving' | 'attention_needed' | 'waiting' | 'parked' | 'completed';
+
+export interface ProjectHistoryEntry {
+  timestamp: number;
+  note: string;
+  next_step: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  current_position: string;
+  next_step: string;
+  upcoming_steps?: string[];
+  last_updated: number; // ms timestamp
+  review_interval_days: number; // default 7
+  history: ProjectHistoryEntry[];
+  googleTaskId?: string;
+  googleTaskListId?: string;
+}
+
+export type HabitType = 'boolean' | 'duration_min';
+
+export interface Habit {
+  id: string;
+  name: string;
+  type: HabitType;
+  target: number; // 1 for boolean, minutes for duration
+  next_due?: string | null; // e.g. "Tonight by 11:30 PM", "Daily 8:00 AM"
+  log: Record<string, boolean | number>; // YYYY-MM-DD -> value
+  googleTaskId?: string;
+  googleTaskListId?: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time?: string | null; // HH:MM
+  category?: 'job' | 'responsibility' | 'project' | 'calendar';
+}
+
+export type PanelLevel = 'collapsed' | 'compact' | 'expanded';
+
+export interface PanelStates {
+  quick_jobs: PanelLevel;
+  responsibilities: PanelLevel;
+  projects: PanelLevel;
+  habits: PanelLevel;
+  calendar: 'hidden' | 'week' | 'month';
+}
+
+export interface MomentumBoardData {
+  quick_jobs: QuickJob[];
+  responsibilities: Responsibility[];
+  projects: Project[];
+  habits: Habit[];
+  calendar_events?: CalendarEvent[];
+  current_focus_project_id?: string | null;
+}
+
+export interface FirebaseConfigSettings {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
+}
+
+export interface DedicatedTaskLists {
+  tasksListId?: string; // Dedicated list ID for Tasks (formerly Quick Jobs)
+  jobsListId?: string;  // Dedicated list ID for Jobs (formerly Responsibilities)
+  quickJobsListId: string; // Backward compatibility alias
+  responsibilitiesListId: string; // Backward compatibility alias
+  projectsListId: string;
+  habitsListId: string;
+}
+
+export interface AppSettings {
+  theme: 'dark' | 'light';
+  geminiApiKey: string;
+  geminiModel: string;
+  googleCalendarEmbedUrl?: string; // Optional Google Calendar embed URL
+  googleTasksClientId?: string;    // Google OAuth 2.0 Client ID for Google Tasks
+  googleTasksEmail?: string;       // Optional user Google email for seamless GIS re-auth
+  googleTasksAccountEmail?: string;// Detected authenticated Google Account email
+  googleTasksSyncedLists?: string[];// Summary of synced task lists
+  googleTaskListsMap?: DedicatedTaskLists; // Dedicated 4-list IDs for Quick Jobs, Responsibilities, Projects, Habits
+  googleTasksWebhookUrl?: string;  // Optional Google Apps Script webhook for permanent 0-login sync
+  googleTasksConnected?: boolean;
+  googleTasksAutoSync?: boolean;
+  googleTasksLastSync?: number;
+  firebaseConfig?: FirebaseConfigSettings | null;
+  useCloudSync: boolean;
+  userBoardId: string;
+}
+
+export interface GeminiParsedData {
+  quick_jobs?: Array<{ title: string; due?: string | null; duration?: QuickJobDuration }>;
+  responsibilities?: Array<{ title: string; next_action: string; due?: string | null }>;
+  project_updates?: Array<{ project_name: string; update_note: string; new_next_step?: string | null }>;
+  habits?: Array<{ name: string; value: boolean | number }>;
+}
+export type LayoutMode = 'cockpit' | 'widget';
