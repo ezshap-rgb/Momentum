@@ -636,6 +636,32 @@ function doPost(e) {
       });
     }
 
+    if (action === 'read_tab') {
+      const tab = data.tab || 'Settings';
+      const ss = getSpreadsheet();
+      const targetSheet = ss.getSheetByName(tab);
+      if (!targetSheet) {
+        return jsonResponse({ ok: false, error: 'Tab not found: ' + tab }, 404);
+      }
+
+      const sheetData = targetSheet.getDataRange().getValues();
+      if (sheetData.length <= 1) {
+        return jsonResponse({ ok: true, tab: tab, count: 0, rows: [] });
+      }
+
+      const headers = sheetData[0];
+      const rows = [];
+      for (let i = 1; i < sheetData.length; i++) {
+        const rowObj = {};
+        for (let j = 0; j < headers.length; j++) {
+          rowObj[headers[j]] = sheetData[i][j];
+        }
+        rows.push(rowObj);
+      }
+
+      return jsonResponse({ ok: true, tab: tab, count: rows.length, rows: rows });
+    }
+
     if (action === 'trigger_ingest') {
       scheduledIngestionAndFold();
       return jsonResponse({ ok: true, message: 'Ingestion and folding triggered' });
