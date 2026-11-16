@@ -5,6 +5,8 @@
  * Finish grades: functional, brushed, decorated, hand-finished
  */
 
+import { getCountingDaysDifference, DEFAULT_SERVING_SETTINGS } from './focusAlgorithm';
+
 export type PartSize = 'screw' | 'jewel' | 'wheel' | 'bridge' | 'barrel';
 export type FinishGrade = 'functional' | 'brushed' | 'decorated' | 'hand-finished';
 export type DayCommitmentLevel = 'light' | 'standard' | 'full';
@@ -85,7 +87,7 @@ export function getPartSizeForFriction(friction: number): PartSize {
 }
 
 /**
- * Computes the finish grade based on earliness
+ * Computes the finish grade based on earliness using counting days and completion timestamp
  * - Overdue: functional
  * - Due today or tomorrow (or no deadline): brushed
  * - 2-6 counting days early (or finished within 48h of capture): decorated
@@ -93,34 +95,40 @@ export function getPartSizeForFriction(friction: number): PartSize {
  */
 export function calculateFinishGrade(
   dueDateStr?: string,
-  createdAtStr?: string,
-  now: Date = new Date()
+  completionOrCreatedStr?: string,
+  now: Date = new Date(),
+  countingDays: string[] = DEFAULT_SERVING_SETTINGS.countingDays
 ): FinishGrade {
   if (!dueDateStr) {
-    if (createdAtStr) {
-      const created = new Date(createdAtStr).getTime();
-      const diffHours = (now.getTime() - created) / (1000 * 60 * 60);
-      if (diffHours <= 48) return 'decorated';
+    if (completionOrCreatedStr) {
+      const createdOrComp = new Date(completionOrCreatedStr).getTime();
+      const diffHours = (now.getTime() - createdOrComp) / (1000 * 60 * 60);
+      if (diffHours >= 0 && diffHours <= 48) return 'decorated';
     }
     return 'brushed';
   }
 
+  // Use the completion event's timestamp if provided, else fallback to now
+  const completionDate = completionOrCreatedStr && !isNaN(Date.parse(completionOrCreatedStr))
+    ? new Date(completionOrCreatedStr)
+    : now;
+
   const due = new Date(dueDateStr);
   due.setHours(23, 59, 59, 999);
-  const nowMs = now.getTime();
 
-  if (nowMs > due.getTime()) {
+  if (completionDate.getTime() > due.getTime()) {
     return 'functional'; // Overdue rescue
   }
 
-  const diffDays = Math.ceil((due.getTime() - nowMs) / (1000 * 60 * 60 * 24));
+  // Count counting days early
+  const countingDaysEarly = getCountingDaysDifference(completionDate, due, countingDays);
 
-  if (diffDays <= 1) {
-    return 'brushed';
-  } else if (diffDays <= 6) {
-    return 'decorated';
+  if (countingDaysEarly <= 1) {
+    return 'brushed'; // due today or tomorrow
+  } else if (countingDaysEarly <= 6) {
+    return 'decorated'; // 2-6 counting days early
   } else {
-    return 'hand-finished';
+    return 'hand-finished'; // 7+ counting days early
   }
 }
 

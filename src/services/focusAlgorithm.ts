@@ -7,6 +7,11 @@ export interface ServingSettings {
   fatigueActionCount: number; // 5
   fatigueActiveMinutes: number; // 90
   smallerTapsBeforeShrink: number; // 2
+  tapShiftFadeInterval: number; // 3 completions per 1 shift fade
+  tripwireCountingDaysThreshold: number; // 1
+  projectStagnantDaysThreshold: number; // 3
+  finishGradeDecoratedThreshold: number; // 2
+  finishGradeHandFinishedThreshold: number; // 7
   importanceBonusHigh: number; // 5
   importanceBonusMed: number; // 2
   importanceBonusLow: number; // 0
@@ -14,6 +19,7 @@ export interface ServingSettings {
   ageBonusMax: number; // 4
   heartbeatBonus: number; // 3
   varietyPenalty: number; // -3
+  frictionDistancePenaltyMultiplier: number; // 4
 }
 
 export const DEFAULT_SERVING_SETTINGS: ServingSettings = {
@@ -23,6 +29,11 @@ export const DEFAULT_SERVING_SETTINGS: ServingSettings = {
   fatigueActionCount: 5,
   fatigueActiveMinutes: 90,
   smallerTapsBeforeShrink: 2,
+  tapShiftFadeInterval: 3,
+  tripwireCountingDaysThreshold: 1,
+  projectStagnantDaysThreshold: 3,
+  finishGradeDecoratedThreshold: 2,
+  finishGradeHandFinishedThreshold: 7,
   importanceBonusHigh: 5,
   importanceBonusMed: 2,
   importanceBonusLow: 0,
@@ -30,12 +41,14 @@ export const DEFAULT_SERVING_SETTINGS: ServingSettings = {
   ageBonusMax: 4,
   heartbeatBonus: 3,
   varietyPenalty: -3,
+  frictionDistancePenaltyMultiplier: 4,
 };
 
 export interface SessionContext {
   completedActions: FocusAction[];
   totalActiveMinutes: number;
   tapShift: number; // accumulated shift from smaller/bigger
+  tapShiftBaselineCompletions?: number; // completions count when tapShift was last modified
   consecutiveSmallerTaps: number;
   fewerRepsTapped: boolean;
   reservedSlotUsedToday: boolean;
@@ -114,8 +127,9 @@ export function computeTargetFriction(
     reasons.push('Fatigue easing applied (-1)');
   }
 
-  // 3. User tap shift (smaller/bigger), fading by 1 for every 3 completions
-  const fade = Math.floor(completions / 3);
+  // 3. User tap shift (smaller/bigger), fading by 1 for every tapShiftFadeInterval completions since the tap
+  const completionsSinceTap = Math.max(0, completions - (ctx.tapShiftBaselineCompletions ?? 0));
+  const fade = Math.floor(completionsSinceTap / (settings.tapShiftFadeInterval || 3));
   let effectiveTapShift = ctx.tapShift;
   if (effectiveTapShift > 0) effectiveTapShift = Math.max(0, effectiveTapShift - fade);
   if (effectiveTapShift < 0) effectiveTapShift = Math.min(0, effectiveTapShift + fade);
@@ -221,29 +235,64 @@ export function rankCandidates(
   }
 
   // OVERRIDE 1: TRIPWIRE
+  const tripwireCandidates: FocusAction[] = [];
   for (const a of available) {
     if (isPhysicalExerciseAction(a)) continue; // Never trigger tripwires on exercise habits
     if (a.deadline_kind === 'external' && a.due_date) {
       const dueDate = new Date(a.due_date);
-      const countingDaysAway = getCountingDaysDifference(now, dueDate, settings.countingDays);
-      if (countingDaysAway <= 1) {
-        const tripwireScore: CandidateScore = {
-          action: a,
-          totalScore: 9999,
-          targetFriction,
-          effectiveFriction: Number(a.friction) || 2,
-          urgencyScore: 10,
-          importanceScore: 5,
-          ageScore: 0,
-          heartbeatScore: 0,
-          varietyScore: 0,
-          isTripwire: true,
-          isReservedSlot: false,
-          reasons: ['Tripwire: External deadline due soon'],
-        };
-        return { selected: tripwireScore, ranked: [tripwireScore], paired: null };
+      if (isCountDay) {
+        const countingDaysAway = getCountingDaysDifference(now, dueDate, settings.countingDays);
+        if (countingDaysAway <= settings.tripwireCountingDaysThreshold) {
+          tripwireCandidates.push(a);
+        }
+      } else {
+        // Fix 3: On off days (e.g. Fri/Sat), only trigger tripwire for same-day deadlines
+        const isDueToday = dueDate.toDateString() === now.toDateString() || (dueDate.getTime() <= now.getTime());
+        if (isDueToday) {
+          tripwireCandidates.push(a);
+        }
       }
     }
+  }
+
+  if (tripwireCandidates.length > 0) {
+    // Fix 2: Choose the most urgent matching item (soonest due date)
+    tripwireCandidates.sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+    const pickedTripwire = tripwireCandidates[0];
+    const rawFric = Number(pickedTripwire.friction) || 2;
+
+    // Fix 2: If item's friction is more than target+1, serve only its first physical action as a tiny task
+    let servedAction = pickedTripwire;
+    let effectiveFric = rawFric;
+    const reasons = ['Tripwire: External deadline due soon'];
+
+    if (rawFric > targetFriction + 1) {
+      servedAction = {
+        ...pickedTripwire,
+        title: pickedTripwire.first_action || `First step: ${pickedTripwire.title}`,
+        friction: Math.min(targetFriction, 2),
+        time_bucket: '< 5m',
+        needs_shrinking: false,
+      };
+      effectiveFric = servedAction.friction;
+      reasons.push('High friction: shrunk to first physical step');
+    }
+
+    const tripwireScore: CandidateScore = {
+      action: servedAction,
+      totalScore: 9999,
+      targetFriction,
+      effectiveFriction: effectiveFric,
+      urgencyScore: 10,
+      importanceScore: 5,
+      ageScore: 0,
+      heartbeatScore: 0,
+      varietyScore: 0,
+      isTripwire: true,
+      isReservedSlot: false,
+      reasons,
+    };
+    return { selected: tripwireScore, ranked: [tripwireScore], paired: null };
   }
 
   // OVERRIDE 2: RESERVED SLOT
@@ -315,11 +364,42 @@ export function rankCandidates(
       if (ageScore >= 2) reasons.push('Waiting for a while');
     }
 
-    // Project Heartbeat
+    // Project Heartbeat: only apply when project has had no completed action for stagnant threshold counting days
     let heartbeatScore = 0;
     if (a.category === 'project') {
-      heartbeatScore = settings.heartbeatBonus;
-      reasons.push('Project needs momentum');
+      const projId = a.project_id || a.project_title || '';
+      let lastCompletedTime: number | null = null;
+      const allCompleted = [
+        ...ctx.completedActions,
+        ...actions.filter((x) => x.status === 'done' && x.completed_at),
+      ];
+      for (const comp of allCompleted) {
+        const compProj = comp.project_id || comp.project_title || '';
+        if (compProj && projId && compProj === projId && comp.completed_at) {
+          const t = new Date(comp.completed_at).getTime();
+          if (lastCompletedTime === null || t > lastCompletedTime) {
+            lastCompletedTime = t;
+          }
+        }
+      }
+
+      let isStagnant = false;
+      if (lastCompletedTime) {
+        const daysSinceLastAction = getCountingDaysDifference(new Date(lastCompletedTime), now, settings.countingDays);
+        if (daysSinceLastAction >= settings.projectStagnantDaysThreshold) {
+          isStagnant = true;
+        }
+      } else if (a.created_at) {
+        const daysOld = getCountingDaysDifference(new Date(a.created_at), now, settings.countingDays);
+        if (daysOld >= settings.projectStagnantDaysThreshold) {
+          isStagnant = true;
+        }
+      }
+
+      if (isStagnant) {
+        heartbeatScore = settings.heartbeatBonus;
+        reasons.push('Project needs momentum (no progress in 3 work days)');
+      }
     }
 
     // Variety Score
@@ -330,7 +410,7 @@ export function rankCandidates(
 
     // Friction Distance Penalty
     const frictionDist = Math.abs(effectiveFriction - targetFriction);
-    const frictionPenalty = frictionDist * 4;
+    const frictionPenalty = frictionDist * (settings.frictionDistancePenaltyMultiplier || 4);
 
     const totalScore = urgencyScore + importanceScore + ageScore + heartbeatScore + varietyScore - frictionPenalty;
 
@@ -370,6 +450,7 @@ export function rankCandidates(
  * Phase 8: Pair selection function using existing ranking
  * Upper card: best-ranked at target + 1 (more reward)
  * Lower card: best-ranked at target - 1 (less reward), from a different project when possible
+ * Enforces strictly higher friction for the upper card; returns null if strict contrast cannot be met.
  */
 export function selectPairedCandidates(
   rankedCandidates: CandidateScore[],
@@ -380,55 +461,48 @@ export function selectPairedCandidates(
   const targetUpper = Math.min(5, targetFriction + 1);
   const targetLower = Math.max(1, targetFriction - 1);
 
-  // 1. Find candidates matching targetUpper (friction = T + 1)
-  let upper = rankedCandidates.find((c) => c.effectiveFriction === targetUpper);
-  if (!upper) {
-    // Fallback: candidate with friction > targetFriction, or highest friction candidate
-    upper = rankedCandidates.find((c) => c.effectiveFriction > targetFriction) || rankedCandidates[0];
-  }
+  // Filter candidate options that can serve as upper (must have friction >= targetFriction)
+  const upperOptions = rankedCandidates.filter((c) => c.effectiveFriction >= targetFriction);
+  if (upperOptions.length === 0) return null;
 
-  // 2. Find candidates matching targetLower (friction = T - 1)
-  // Prefer candidate from a different project than upper
-  const upperProjectId = upper.action.project_id || upper.action.project_title || '';
-  const remaining = rankedCandidates.filter((c) => c.action.task_id !== upper!.action.task_id);
+  // Search through potential upper candidates in rank order
+  for (const upper of upperOptions) {
+    const upperProjectId = upper.action.project_id || upper.action.project_title || '';
+    // Lower candidate MUST have strictly lower friction than upper
+    const eligibleLowers = rankedCandidates.filter(
+      (c) => c.action.task_id !== upper.action.task_id && upper.effectiveFriction > c.effectiveFriction
+    );
+    if (eligibleLowers.length === 0) continue;
 
-  let lower = remaining.find((c) => {
-    const proj = c.action.project_id || c.action.project_title || '';
-    const diffProject = proj && upperProjectId ? proj !== upperProjectId : true;
-    return c.effectiveFriction === targetLower && diffProject;
-  });
-
-  if (!lower) {
-    // Try matching targetLower regardless of project
-    lower = remaining.find((c) => c.effectiveFriction === targetLower);
-  }
-
-  if (!lower) {
-    // Try candidate with friction < targetFriction from different project
-    lower = remaining.find((c) => {
+    // Prefer exact targetLower from differing project
+    let lower = eligibleLowers.find((c) => {
       const proj = c.action.project_id || c.action.project_title || '';
-      const diffProject = proj && upperProjectId ? proj !== upperProjectId : true;
-      return c.effectiveFriction < targetFriction && diffProject;
+      const diffProj = proj && upperProjectId ? proj !== upperProjectId : true;
+      return c.effectiveFriction === targetLower && diffProj;
     });
+
+    if (!lower) {
+      // Try matching targetLower regardless of project
+      lower = eligibleLowers.find((c) => c.effectiveFriction === targetLower);
+    }
+
+    if (!lower) {
+      // Try any eligible lower from differing project
+      lower = eligibleLowers.find((c) => {
+        const proj = c.action.project_id || c.action.project_title || '';
+        return proj && upperProjectId ? proj !== upperProjectId : false;
+      });
+    }
+
+    if (!lower) {
+      lower = eligibleLowers[0];
+    }
+
+    if (lower && upper.effectiveFriction > lower.effectiveFriction) {
+      return [upper, lower];
+    }
   }
 
-  if (!lower) {
-    // Try candidate with friction < targetFriction
-    lower = remaining.find((c) => c.effectiveFriction < targetFriction);
-  }
-
-  if (!lower) {
-    // Fallback: any other candidate, preferring different project
-    lower = remaining.find((c) => {
-      const proj = c.action.project_id || c.action.project_title || '';
-      return proj && upperProjectId ? proj !== upperProjectId : false;
-    }) || remaining[0];
-  }
-
-  if (!lower || lower.action.task_id === upper.action.task_id) {
-    return null;
-  }
-
-  // Return [upper (target+1 / more reward), lower (target-1 / less reward)]
-  return [upper, lower];
+  // If no pair can be formed with upper.effectiveFriction > lower.effectiveFriction, return null (single card fallback)
+  return null;
 }
