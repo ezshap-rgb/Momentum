@@ -2,6 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMomentum } from '../context/MomentumContext';
 import { SettingsModal } from './SettingsModal';
 import { CandidateInspectorModal } from './CandidateInspectorModal';
+import { DayMovementBenchModal } from './DayMovementBenchModal';
+import { DayCommitmentPromptModal } from './DayCommitmentPromptModal';
+import {
+  DayModule,
+  DayCommitmentLevel,
+  WatchPart,
+  DAY_MODULE_NAMES,
+  COMMITMENT_POINTS,
+  calculateWorkValue,
+  getPartSizeForFriction,
+  calculateFinishGrade,
+} from '../services/focusMovement';
+import { isCountingDay } from '../services/focusAlgorithm';
 import {
   queueEvent,
   readTabFromSheet,
@@ -84,6 +97,27 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
   // Current ignition exercise
   const [currentExercise, setCurrentExercise] = useState<IgnitionExercise>(() => pickNextExercise());
 
+  // Watch Movement & Rewards (Phase 6)
+  const [showBenchModal, setShowBenchModal] = useState(false);
+  const [showCommitPrompt, setShowCommitPrompt] = useState(false);
+  const [dayModule, setDayModule] = useState<DayModule>(() => {
+    const today = new Date();
+    const dayAbbr = today.toLocaleDateString('en-US', { weekday: 'short' });
+    const fullDayName = today.toLocaleDateString('en-US', { weekday: 'long' });
+    const savedLevel = (localStorage.getItem('focus_day_commitment_level') as DayCommitmentLevel) || 'standard';
+    return {
+      day_name: fullDayName,
+      module_name: DAY_MODULE_NAMES[dayAbbr] || 'Watchmaker Bench',
+      date: today.toISOString().split('T')[0],
+      committed_level: savedLevel,
+      committed_work_points: COMMITMENT_POINTS[savedLevel],
+      total_work_done: 0,
+      parts: [],
+      is_closed: false,
+      can_lower_commitment: true,
+    };
+  });
+
   // Current served action
   const [currentAction, setCurrentAction] = useState<FocusAction | null>(null);
   const [isMicroFirstStepOnly, setIsMicroFirstStepOnly] = useState(false);
@@ -135,8 +169,21 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     refreshActionsPool();
   };
 
-  // 1. DO Tap -> Ignition Screen
+  // 1. DO Tap -> Check Day Commitment on Counting Day, then Ignition Screen
   const handleDoPress = async () => {
+    // If today is a counting day (Sun-Thu) and commitment not set today, prompt once
+    const todayStr = new Date().toISOString().split('T')[0];
+    const hasCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
+
+    if (isCountingDay() && !hasCommittedToday) {
+      setShowCommitPrompt(true);
+      return;
+    }
+
+    proceedToIgnition();
+  };
+
+  const proceedToIgnition = async () => {
     const nextEx = pickNextExercise(currentExercise.name);
     setCurrentExercise(nextEx);
     setStage('ignition');
@@ -144,6 +191,27 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       exercise: nextEx.name,
       targetReps: nextEx.reps,
     });
+  };
+
+  const handleCommitChoice = async (level: DayCommitmentLevel) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    localStorage.setItem('focus_committed_date', todayStr);
+    localStorage.setItem('focus_day_commitment_level', level);
+
+    setDayModule((prev) => ({
+      ...prev,
+      committed_level: level,
+      committed_work_points: COMMITMENT_POINTS[level],
+    }));
+
+    await queueEvent('day_committed', {
+      level,
+      points: COMMITMENT_POINTS[level],
+      date: todayStr,
+    });
+
+    setShowCommitPrompt(false);
+    proceedToIgnition();
   };
 
   // 2. Ignition Controls
@@ -281,6 +349,50 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     });
 
     if (currentAction) {
+      const friction = Number(currentAction.friction) || 2;
+      const workVal = calculateWorkValue(friction, currentAction.importance);
+      const partSize = getPartSizeForFriction(friction);
+      const finishGrade = calculateFinishGrade(currentAction.due_date, currentAction.created_at);
+
+      const newPart: WatchPart = {
+        part_id: 'part_' + Date.now(),
+        name: `${finishGrade} ${partSize}`,
+        part_size: partSize,
+        finish_grade: finishGrade,
+        action_id: currentAction.task_id,
+        action_title: currentAction.title,
+        work_value: workVal,
+        earned_at: new Date().toISOString(),
+      };
+
+      // Vibrate if supported
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate(60); } catch (_) {}
+      }
+
+      await queueEvent('part_earned', {
+        part: newPart,
+        work_value: workVal,
+      });
+
+      setDayModule((prev) => {
+        const newWork = prev.total_work_done + workVal;
+        const willClose = newWork >= prev.committed_work_points && !prev.is_closed;
+        if (willClose) {
+          queueEvent('module_closed', {
+            module_name: prev.module_name,
+            day: prev.day_name,
+            committed_level: prev.committed_level,
+          });
+        }
+        return {
+          ...prev,
+          total_work_done: newWork,
+          parts: [...prev.parts, newPart],
+          is_closed: prev.is_closed || willClose,
+        };
+      });
+
       setActionsPool((prev) =>
         prev.map((a) =>
           a.task_id === currentAction.task_id ? { ...a, status: 'done', completed_at: new Date().toISOString() } : a
@@ -335,6 +447,16 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Watchmaker Bench Button (Shows movement parts & rewards) */}
+          <button
+            onClick={() => setShowBenchModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
+            title="Open Watchmaker Bench (Day Movement Progress)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden xs:inline">Bench</span>
+          </button>
+
           <SyncIndicator />
 
           <button
@@ -785,6 +907,46 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         <CandidateInspectorModal
           candidates={rankedCandidates}
           onClose={() => setShowInspector(false)}
+        />
+      )}
+
+      {/* Watchmaker Bench Modal */}
+      {showBenchModal && (
+        <DayMovementBenchModal
+          module={dayModule}
+          onCommitChange={async (lvl) => {
+            setDayModule((prev) => ({
+              ...prev,
+              committed_level: lvl,
+              committed_work_points: COMMITMENT_POINTS[lvl],
+            }));
+            await queueEvent('day_committed', {
+              level: lvl,
+              points: COMMITMENT_POINTS[lvl],
+              reason: 'user_recalibration',
+            });
+          }}
+          onFreshStart={async () => {
+            setDayModule((prev) => ({
+              ...prev,
+              total_work_done: 0,
+              parts: [],
+              is_closed: false,
+            }));
+            await queueEvent('fresh_start', {
+              date: dayModule.date,
+            });
+            setShowBenchModal(false);
+          }}
+          onClose={() => setShowBenchModal(false)}
+        />
+      )}
+
+      {/* Daily Commitment First-Do Prompt Modal */}
+      {showCommitPrompt && (
+        <DayCommitmentPromptModal
+          suggestedLevel={dayModule.committed_level}
+          onCommit={handleCommitChoice}
         />
       )}
     </div>
