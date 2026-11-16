@@ -264,15 +264,17 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
     // Target friction increases by 1 upon completion (up to ceiling 4)
     const nextTarget = Math.min(4, servingState.targetFriction + 1);
+    const newCompletedCount = servingState.completedCount + 1;
+
     setServingState((prev) => ({
       ...prev,
       targetFriction: nextTarget,
-      completedCount: prev.completedCount + 1,
+      completedCount: newCompletedCount,
       consecutiveNotNows: 0,
     }));
 
-    // Next ignition or action loop
-    setStage('do_button');
+    // ADHD Action Flow: keep going in the string immediately!
+    serveNextOffer(nextTarget, 0);
   };
 
   const handleShrinkRequest = async () => {
@@ -460,7 +462,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
             </button>
 
             {/* Micro Controls: Smaller part, Bigger part, Not now */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 mb-3">
               <button
                 onClick={handleSmallerPart}
                 className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1"
@@ -482,6 +484,41 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                 Not now
               </button>
             </div>
+
+            {/* Session Momentum & Guilt-Free Stop Option */}
+            {servingState.completedCount > 0 && (
+              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold">
+                  <Flame className="w-4 h-4 text-amber-400 fill-current" />
+                  <span>
+                    {servingState.completedCount} done this flow
+                    {servingState.completedCount >= 2 && ' (Goal Met! 🎉)'}
+                  </span>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    await queueEvent('flow_stopped_cleanly', {
+                      completed_in_session: servingState.completedCount,
+                      reason: 'voluntary_stop',
+                    });
+                    setStage('do_button');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 ${
+                    servingState.completedCount >= 2
+                      ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60'
+                      : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                  title={
+                    servingState.completedCount >= 2
+                      ? 'You completed 2+ tasks. Stop with full credit!'
+                      : 'Stop this flow session'
+                  }
+                >
+                  {servingState.completedCount >= 2 ? 'Done for now ✓' : 'Stop flow'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
