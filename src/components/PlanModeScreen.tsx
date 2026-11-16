@@ -53,6 +53,7 @@ import { WatchPartVector } from './WatchPartVector';
 import { GearTrainWidget } from './GearTrainWidget';
 import { CandidateInspectorModal } from './CandidateInspectorModal';
 import { ExperimentsModal } from './ExperimentsModal';
+import { HabitEditModal } from './HabitEditModal';
 import {
   loadHabitsState,
   saveHabitsState,
@@ -102,6 +103,7 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [editingAction, setEditingAction] = useState<FocusAction | null>(null);
+  const [editingHabit, setEditingHabit] = useState<HabitItem | null>(null);
   const [showInspector, setShowInspector] = useState(false);
   const [showExperiments, setShowExperiments] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -208,6 +210,43 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
     );
 
     setEditingAction(null);
+  };
+
+  // Handle Habit Update
+  const handleSaveHabitEdit = async (updated: HabitItem) => {
+    const nextList = habitsList.map((h) => (h.habit_id === updated.habit_id ? updated : h));
+    setHabitsList(nextList);
+    saveHabitsState(nextList);
+    await queueEvent('habit_updated', {
+      habit_id: updated.habit_id,
+      name: updated.name,
+      quota: updated.quota,
+      unit: updated.unit,
+      circuit: updated.circuit,
+      half: updated.half,
+      currentReps: updated.currentReps,
+    });
+    setEditingHabit(null);
+  };
+
+  // Handle Plan Mode Direct Daily Commitment Calibration
+  const handleCommitLevelChange = async (level: DayCommitmentLevel) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    localStorage.setItem('focus_committed_date', todayStr);
+    localStorage.setItem('focus_day_commitment_level', level);
+
+    setDayModule((prev) => ({
+      ...prev,
+      committed_level: level,
+      committed_work_points: COMMITMENT_POINTS[level],
+    }));
+
+    await queueEvent('day_committed', {
+      level,
+      points: COMMITMENT_POINTS[level],
+      date: todayStr,
+      source: 'plan_mode_today',
+    });
   };
 
   // Group actions by project
@@ -478,6 +517,67 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Daily Capacity Calibration Card */}
+              {(() => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const isCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
+                return (
+                  <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-3xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-purple-400" />
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                          Daily Capacity Calibration
+                        </h3>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          isCommittedToday
+                            ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
+                            : 'bg-amber-950/80 border-amber-700/60 text-amber-300'
+                        }`}
+                      >
+                        {isCommittedToday ? 'Today Calibrated ✓' : 'Pending Kickoff'}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-400">
+                      Set your baseline daily work target. Downscale anytime without guilt or broken streaks.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      {[
+                        { level: 'light' as DayCommitmentLevel, label: 'Light', pts: 8, desc: '1–2 focused actions · Recovery or busy day' },
+                        { level: 'standard' as DayCommitmentLevel, label: 'Standard', pts: 16, desc: '3–4 focused actions · Baseline daily rhythm' },
+                        { level: 'full' as DayCommitmentLevel, label: 'Full', pts: 26, desc: '5+ focused actions · Deep work sprint day' },
+                      ].map((item) => {
+                        const isSelected = dayModule.committed_level === item.level;
+                        return (
+                          <button
+                            key={item.level}
+                            onClick={() => handleCommitLevelChange(item.level)}
+                            className={`p-3.5 rounded-2xl border text-left transition-all ${
+                              isSelected
+                                ? 'bg-purple-950/60 border-purple-500 ring-1 ring-purple-500/40 text-white'
+                                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                                {item.label}
+                                {isSelected && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                              </span>
+                              <span className="font-mono text-[10px] text-purple-400 font-bold">{item.pts} pts</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 leading-snug">{item.desc}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Movement Parts Revealed Today */}
               <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-3xl space-y-3">
@@ -862,6 +962,13 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
 
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => setEditingHabit(h)}
+                          className="p-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-purple-300 hover:border-purple-600/50 transition"
+                          title="Edit habit quota and details"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => {
                             const newReps = h.isComplete ? 0 : h.quota;
                             const updated = habitsList.map((it) =>
@@ -1023,6 +1130,15 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
           action={editingAction}
           onSave={handleSaveActionCorrection}
           onClose={() => setEditingAction(null)}
+        />
+      )}
+
+      {/* Habit Edit Modal */}
+      {editingHabit && (
+        <HabitEditModal
+          habit={editingHabit}
+          onSave={handleSaveHabitEdit}
+          onClose={() => setEditingHabit(null)}
         />
       )}
 

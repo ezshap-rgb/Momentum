@@ -5,15 +5,25 @@ import { Compass, Sparkles, ArrowRight } from 'lucide-react';
 interface Props {
   suggestedLevel?: DayCommitmentLevel;
   onCommit: (level: DayCommitmentLevel) => void;
+  onClose?: () => void;
 }
 
 export function DayCommitmentPromptModal({
   suggestedLevel = 'standard',
   onCommit,
+  onClose,
 }: Props) {
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fadeIn">
-      <div className="w-full max-w-sm bg-slate-900 border border-purple-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl text-center">
+      <div className="w-full max-w-sm bg-slate-900 border border-purple-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl text-center relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 text-slate-500 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition"
+          >
+            ✕
+          </button>
+        )}
         <div className="w-12 h-12 rounded-2xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center mx-auto mb-4 text-purple-400">
           <Compass className="w-6 h-6 animate-pulse" />
         </div>

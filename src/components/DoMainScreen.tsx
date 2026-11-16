@@ -258,15 +258,6 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       mode: expStatus.effectiveMode,
     });
 
-    // If today is a counting day (Sun-Thu) and commitment not set today, prompt once
-    const todayStr = new Date().toISOString().split('T')[0];
-    const hasCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
-
-    if (isCountingDay() && !hasCommittedToday) {
-      setShowCommitPrompt(true);
-      return;
-    }
-
     proceedToIgnition();
   };
 
@@ -299,6 +290,24 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       points: COMMITMENT_POINTS[level],
       date: todayStr,
     });
+
+    // If completing the daily calibration task
+    if (currentAction?.task_id.startsWith('action_daily_calibration_')) {
+      const completedTask = currentAction;
+      await queueEvent('action_completed', {
+        task_id: completedTask.task_id,
+        friction: 1,
+        actual_minutes: 1,
+        finish_grade: 'standard',
+        part_earned: 'screw',
+        work_value: 1,
+      });
+
+      setCompletedActions((prev) => [...prev, completedTask]);
+      setShowCommitPrompt(false);
+      serveNextOffer(0);
+      return;
+    }
 
     setShowCommitPrompt(false);
     proceedToIgnition();
@@ -339,6 +348,54 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   };
 
   const serveNextOffer = (notNowCount: number) => {
+    // If today is a counting day and commitment is not set yet, serve Daily Calibration as first action
+    const todayStr = new Date().toISOString().split('T')[0];
+    const hasCommittedToday = localStorage.getItem('focus_committed_date') === todayStr;
+    const calibTaskId = 'action_daily_calibration_' + todayStr;
+
+    if (isCountingDay() && !hasCommittedToday && !skippedTaskIds.has(calibTaskId)) {
+      const dailyCalibAction: FocusAction = {
+        task_id: calibTaskId,
+        title: "Daily Calibration: Set Today's Commitment",
+        friction: 1,
+        time_bucket: '< 5m',
+        category: 'quick',
+        importance: 'high',
+        first_action: "Pick Light (8 pts), Standard (16 pts), or Full (26 pts) to calibrate today's capacity",
+        status: 'waiting',
+        why_it_matters: 'Calibrates daily capacity and sets your momentum target with zero cognitive friction.',
+      };
+      const calibScore: CandidateScore = {
+        action: dailyCalibAction,
+        totalScore: 99999,
+        targetFriction: 1,
+        effectiveFriction: 1,
+        urgencyScore: 10,
+        importanceScore: 10,
+        ageScore: 0,
+        heartbeatScore: 0,
+        varietyScore: 0,
+        isTripwire: false,
+        isReservedSlot: false,
+        reasons: ['Daily Kick-off: Set commitment level for today'],
+      };
+      setCurrentAction(dailyCalibAction);
+      setCurrentScoreData(calibScore);
+      setRankedCandidates([calibScore]);
+      setPairedCandidates(null);
+      setIsMicroFirstStepOnly(false);
+      setStage('offer');
+      queueEvent('offer_served', {
+        task_id: dailyCalibAction.task_id,
+        mode: 'assigned',
+        target_friction: 1,
+        micro_only: false,
+        is_tripwire: false,
+        is_reserved: false,
+      });
+      return;
+    }
+
     const ctx: SessionContext = {
       completedActions,
       totalActiveMinutes,
@@ -393,6 +450,10 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
 
   // 4. Offer Screen Controls
   const handleSmallerPart = async () => {
+    if (currentAction?.task_id.startsWith('action_daily_calibration_')) {
+      setShowCommitPrompt(true);
+      return;
+    }
     setTapShift((prev) => prev - 1);
     await queueEvent('smaller_part', {
       task_id: currentAction?.task_id,
@@ -401,6 +462,10 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   };
 
   const handleBiggerPart = async () => {
+    if (currentAction?.task_id.startsWith('action_daily_calibration_')) {
+      setShowCommitPrompt(true);
+      return;
+    }
     setTapShift((prev) => prev + 1);
     await queueEvent('bigger_part', {
       task_id: currentAction?.task_id,
@@ -426,6 +491,10 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
 
   const handleStartAction = async (actionToStart?: FocusAction) => {
     const act = actionToStart || currentAction;
+    if (act?.task_id.startsWith('action_daily_calibration_')) {
+      setShowCommitPrompt(true);
+      return;
+    }
     if (actionToStart) setCurrentAction(actionToStart);
     setStage('action_running');
     setTimerSeconds(0);
@@ -1337,6 +1406,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         <DayCommitmentPromptModal
           suggestedLevel={dayModule.committed_level}
           onCommit={handleCommitChoice}
+          onClose={() => setShowCommitPrompt(false)}
         />
       )}
 
