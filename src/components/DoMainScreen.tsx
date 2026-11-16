@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMomentum } from '../context/MomentumContext';
 import { SettingsModal } from './SettingsModal';
+import { CandidateInspectorModal } from './CandidateInspectorModal';
 import {
   queueEvent,
   readTabFromSheet,
@@ -10,11 +11,15 @@ import {
 } from '../services/focusDataLayer';
 import {
   FocusAction,
-  ServingState,
   IgnitionExercise,
   pickNextExercise,
-  pickBestAction,
 } from '../services/focusServing';
+import {
+  rankCandidates,
+  computeTargetFriction,
+  CandidateScore,
+  SessionContext,
+} from '../services/focusAlgorithm';
 import { SyncIndicator } from './SyncIndicator';
 import {
   Zap,
@@ -61,12 +66,20 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
   // Pool of actions & serving state
   const [actionsPool, setActionsPool] = useState<FocusAction[]>([]);
-  const [servingState, setServingState] = useState<ServingState>({
-    targetFriction: 2,
-    completedCount: 0,
-    consecutiveNotNows: 0,
-    skippedTaskIds: new Set(),
-  });
+  const [completedActions, setCompletedActions] = useState<FocusAction[]>([]);
+  const [totalActiveMinutes, setTotalActiveMinutes] = useState(0);
+  const [tapShift, setTapShift] = useState(0);
+  const [fewerRepsTapped, setFewerRepsTapped] = useState(false);
+  const [reservedSlotUsed, setReservedSlotUsed] = useState(false);
+  const [stretchProbeUsed, setStretchProbeUsed] = useState(false);
+  const [skippedTaskIds, setSkippedTaskIds] = useState<Set<string>>(new Set());
+  const [lastCompletedType, setLastCompletedType] = useState<string | undefined>();
+  const [consecutiveNotNows, setConsecutiveNotNows] = useState(0);
+
+  // Inspector & Explanation
+  const [rankedCandidates, setRankedCandidates] = useState<CandidateScore[]>([]);
+  const [currentScoreData, setCurrentScoreData] = useState<CandidateScore | null>(null);
+  const [showInspector, setShowInspector] = useState(false);
 
   // Current ignition exercise
   const [currentExercise, setCurrentExercise] = useState<IgnitionExercise>(() => pickNextExercise());
@@ -124,7 +137,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
   // 1. DO Tap -> Ignition Screen
   const handleDoPress = async () => {
-    const nextEx = pickNextExercise(servingState.lastExercise);
+    const nextEx = pickNextExercise(currentExercise.name);
     setCurrentExercise(nextEx);
     setStage('ignition');
     await queueEvent('ignition_offered', {
@@ -137,6 +150,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
   const handleFewerReps = async () => {
     const reduced = Math.max(3, Math.round(currentExercise.reps * 0.6));
     setCurrentExercise((prev) => ({ ...prev, reps: reduced }));
+    setFewerRepsTapped(true);
     await queueEvent('ignition_smaller', {
       exercise: currentExercise.name,
       newReps: reduced,
@@ -159,27 +173,45 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       reps: currentExercise.reps,
     });
 
-    setServingState((prev) => ({ ...prev, lastExercise: currentExercise.name }));
-
-    // Pick best action matching target friction
-    serveNextOffer(servingState.targetFriction, servingState.consecutiveNotNows);
+    serveNextOffer(consecutiveNotNows);
   };
 
-  const serveNextOffer = (targetFriction: number, notNowCount: number) => {
-    const pick = pickBestAction(actionsPool, targetFriction, servingState.skippedTaskIds);
+  const serveNextOffer = (notNowCount: number) => {
+    const ctx: SessionContext = {
+      completedActions,
+      totalActiveMinutes,
+      tapShift,
+      consecutiveSmallerTaps: 0,
+      fewerRepsTapped,
+      reservedSlotUsedToday: reservedSlotUsed,
+      stretchProbeUsedToday: stretchProbeUsed,
+      skippedTaskIds,
+      lastCompletedType,
+      now: new Date(),
+    };
 
-    if (!pick) {
+    const { selected, ranked } = rankCandidates(actionsPool, ctx);
+    setRankedCandidates(ranked);
+
+    if (selected) {
+      setCurrentAction(selected.action);
+      setCurrentScoreData(selected);
+      if (selected.isReservedSlot) setReservedSlotUsed(true);
+      if (selected.totalScore >= 9000 && selected.isTripwire) {
+        // Tripwire was served
+      }
+    } else {
       // Fallback action if pool is empty
-      setCurrentAction({
+      const fallback: FocusAction = {
         task_id: 'default_action',
         title: 'Choose one quick thing right in front of you',
-        friction: targetFriction,
+        friction: 2,
         time_bucket: 'under 5',
-        first_action: 'Stand up and take the first step',
+        first_action: 'Stand up and take the first physical step',
         status: 'waiting',
-      });
-    } else {
-      setCurrentAction(pick);
+      };
+      setCurrentAction(fallback);
+      setCurrentScoreData(null);
     }
 
     // Two not-nows in a row -> offer becomes only the tiny first physical action!
@@ -187,51 +219,46 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     setStage('offer');
 
     queueEvent('offer_served', {
-      task_id: pick?.task_id || 'default_action',
+      task_id: selected?.action.task_id || 'default_action',
       mode: 'assigned',
-      target_friction: targetFriction,
+      target_friction: selected?.targetFriction || 2,
       micro_only: notNowCount >= 2,
+      is_tripwire: selected?.isTripwire || false,
+      is_reserved: selected?.isReservedSlot || false,
     });
   };
 
   // 4. Offer Screen Controls
   const handleSmallerPart = async () => {
-    const newTarget = Math.max(1, servingState.targetFriction - 1);
-    setServingState((prev) => ({ ...prev, targetFriction: newTarget }));
+    setTapShift((prev) => prev - 1);
     await queueEvent('smaller_part', {
-      old_target: servingState.targetFriction,
-      new_target: newTarget,
+      task_id: currentAction?.task_id,
     });
-    serveNextOffer(newTarget, servingState.consecutiveNotNows);
+    serveNextOffer(consecutiveNotNows);
   };
 
   const handleBiggerPart = async () => {
-    const newTarget = Math.min(4, servingState.targetFriction + 1);
-    setServingState((prev) => ({ ...prev, targetFriction: newTarget }));
+    setTapShift((prev) => prev + 1);
     await queueEvent('bigger_part', {
-      old_target: servingState.targetFriction,
-      new_target: newTarget,
+      task_id: currentAction?.task_id,
     });
-    serveNextOffer(newTarget, servingState.consecutiveNotNows);
+    serveNextOffer(consecutiveNotNows);
   };
 
   const handleNotNow = async () => {
-    const newNotNows = servingState.consecutiveNotNows + 1;
-    const skipped = new Set(servingState.skippedTaskIds);
+    const newNotNows = consecutiveNotNows + 1;
+    const skipped = new Set(skippedTaskIds);
     if (currentAction) skipped.add(currentAction.task_id);
 
-    setServingState((prev) => ({
-      ...prev,
-      consecutiveNotNows: newNotNows,
-      skippedTaskIds: skipped,
-    }));
+    setConsecutiveNotNows(newNotNows);
+    setSkippedTaskIds(skipped);
 
     await queueEvent('not_now', {
       task_id: currentAction?.task_id,
       consecutive: newNotNows,
     });
 
-    serveNextOffer(servingState.targetFriction, newNotNows);
+    serveNextOffer(newNotNows);
   };
 
   const handleStartAction = async () => {
@@ -253,28 +280,21 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       actual_minutes: minutes,
     });
 
-    // Remove from local pool & update stats
     if (currentAction) {
       setActionsPool((prev) =>
         prev.map((a) =>
           a.task_id === currentAction.task_id ? { ...a, status: 'done', completed_at: new Date().toISOString() } : a
         )
       );
+      setCompletedActions((prev) => [...prev, currentAction]);
+      setLastCompletedType(currentAction.type);
     }
 
-    // Target friction increases by 1 upon completion (up to ceiling 4)
-    const nextTarget = Math.min(4, servingState.targetFriction + 1);
-    const newCompletedCount = servingState.completedCount + 1;
-
-    setServingState((prev) => ({
-      ...prev,
-      targetFriction: nextTarget,
-      completedCount: newCompletedCount,
-      consecutiveNotNows: 0,
-    }));
+    setTotalActiveMinutes((prev) => prev + minutes);
+    setConsecutiveNotNows(0);
 
     // ADHD Action Flow: keep going in the string immediately!
-    serveNextOffer(nextTarget, 0);
+    serveNextOffer(0);
   };
 
   const handleShrinkRequest = async () => {
@@ -433,7 +453,16 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
             {/* Why This One explanation drawer */}
             {showWhyThisOne && (
               <div className="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 leading-relaxed animate-fadeIn">
-                <strong>Serving rule:</strong> Target friction is {servingState.targetFriction}. This action matches your current momentum curve, due dates, and energy.
+                <div className="font-bold text-purple-300 mb-1">Serving algorithm breakdown:</div>
+                {currentScoreData?.reasons && currentScoreData.reasons.length > 0 ? (
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
+                    {currentScoreData.reasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11px] text-slate-400">Chosen to match your target friction of {currentScoreData?.targetFriction || 2}.</p>
+                )}
               </div>
             )}
 
@@ -486,36 +515,36 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
             </div>
 
             {/* Session Momentum & Guilt-Free Stop Option */}
-            {servingState.completedCount > 0 && (
+            {completedActions.length > 0 && (
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold">
                   <Flame className="w-4 h-4 text-amber-400 fill-current" />
                   <span>
-                    {servingState.completedCount} done this flow
-                    {servingState.completedCount >= 2 && ' (Goal Met! 🎉)'}
+                    {completedActions.length} done this flow
+                    {completedActions.length >= 2 && ' (Goal Met! 🎉)'}
                   </span>
                 </div>
 
                 <button
                   onClick={async () => {
                     await queueEvent('flow_stopped_cleanly', {
-                      completed_in_session: servingState.completedCount,
+                      completed_in_session: completedActions.length,
                       reason: 'voluntary_stop',
                     });
                     setStage('do_button');
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 ${
-                    servingState.completedCount >= 2
+                    completedActions.length >= 2
                       ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60'
                       : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
                   }`}
                   title={
-                    servingState.completedCount >= 2
+                    completedActions.length >= 2
                       ? 'You completed 2+ tasks. Stop with full credit!'
                       : 'Stop this flow session'
                   }
                 >
-                  {servingState.completedCount >= 2 ? 'Done for now ✓' : 'Stop flow'}
+                  {completedActions.length >= 2 ? 'Done for now ✓' : 'Stop flow'}
                 </button>
               </div>
             )}
@@ -643,7 +672,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
               </div>
 
               {/* Full Momentum Settings Link */}
-              <div className="pt-2 flex items-center justify-between">
+              <div className="pt-2 flex items-center justify-between border-b border-slate-800 pb-3">
                 <span className="text-[11px] text-slate-400">Momentum App Settings</span>
                 <button
                   type="button"
@@ -655,6 +684,22 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                 >
                   <Settings className="w-3.5 h-3.5 text-purple-400" />
                   <span>Open Full Settings</span>
+                </button>
+              </div>
+
+              {/* Developer Candidate Inspector */}
+              <div className="pt-2 flex items-center justify-between">
+                <span className="text-[11px] text-slate-400">Serving Inspector</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfig(false);
+                    setShowInspector(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/60 hover:bg-purple-900/60 active:scale-95 text-purple-200 border border-purple-800 rounded-lg text-xs font-semibold transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Inspect Candidates ({rankedCandidates.length})</span>
                 </button>
               </div>
             </form>
@@ -733,6 +778,14 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       {/* Momentum Full Settings Modal */}
       {showMomentumSettings && (
         <SettingsModal onClose={() => setShowMomentumSettings(false)} />
+      )}
+
+      {/* Developer Candidate Inspector Modal */}
+      {showInspector && (
+        <CandidateInspectorModal
+          candidates={rankedCandidates}
+          onClose={() => setShowInspector(false)}
+        />
       )}
     </div>
   );
