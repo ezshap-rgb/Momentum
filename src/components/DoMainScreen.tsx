@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getStoredCredentials, saveCredentials, sendTestEvent } from '../services/focusDoorway';
+import {
+  getStoredCredentials,
+  saveCredentials,
+  queueEvent,
+  triggerBackgroundSync,
+} from '../services/focusDataLayer';
+import { SyncIndicator } from './SyncIndicator';
 import {
   CheckCircle2,
   AlertCircle,
-  RefreshCw,
   Key,
   Link2,
   Settings,
@@ -20,14 +25,12 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
   const [key, setKey] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     const creds = getStoredCredentials();
     setUrl(creds.url);
     setKey(creds.key);
-    // If credentials aren't set yet, open config panel by default
     if (!creds.url || !creds.key) {
       setShowConfig(true);
     }
@@ -50,29 +53,23 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       return;
     }
 
-    setIsSending(true);
-    setStatus(null);
     try {
-      // In Phase 1: Clicking DO sends a test event to verify round-trip
-      const res = await sendTestEvent(undefined, url, key);
-      if (res.ok) {
-        setStatus({
-          ok: true,
-          message: `Success! Event appended to Google Sheet 'Events' tab! (Event ID: ${res.event_id || res.message || 'ok'})`,
-        });
-      } else {
-        setStatus({
-          ok: false,
-          message: res.error || 'Failed to append event.',
-        });
-      }
+      // Phase 2: Instant zero-latency local logging via IndexedDB outbox, syncing in background
+      const ev = await queueEvent('ignition_offered', {
+        source: 'do_button_tap',
+        time: new Date().toLocaleTimeString(),
+      });
+
+      setStatus({
+        ok: true,
+        message: `Instant ignition recorded locally (${ev.event_id}). Syncing in background...`,
+      });
+      setTimeout(() => setStatus(null), 3000);
     } catch (err: any) {
       setStatus({
         ok: false,
         message: err.toString(),
       });
-    } finally {
-      setIsSending(false);
     }
   };
 
@@ -91,13 +88,16 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Phase 2: Always-visible live sync indicator */}
+          <SyncIndicator />
+
           {/* Shift to Task View (Classic 4 Panels) */}
           <button
             onClick={onOpenTaskView}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition shadow-sm"
           >
             <LayoutGrid className="w-3.5 h-3.5 text-purple-400" />
-            <span>Task View</span>
+            <span className="hidden xs:inline">Task View</span>
           </button>
 
           {/* Config / Secret Key Toggle */}
@@ -115,45 +115,34 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         </div>
       </div>
 
-      {/* Main Center Area: GIANT DO BUTTON */}
+      {/* Main Center Area: GIANT INTENSELY BREATHING DO BUTTON */}
       <div className="flex-1 flex flex-col items-center justify-center my-auto">
         {!showConfig ? (
           <div className="flex flex-col items-center text-center">
-            {/* Pulsing ring around big DO button */}
-            <div className="relative group">
-              <div className="absolute -inset-4 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full blur-xl opacity-40 group-hover:opacity-75 transition duration-500 animate-pulse"></div>
+            {/* Living breathing outer glow container */}
+            <div className="relative flex items-center justify-center">
+              {/* Layer 1: Ambient deep pulsating glow */}
+              <div className="absolute w-72 h-72 sm:w-80 sm:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
 
+              {/* Layer 2: Main breathing magnetic button */}
               <button
                 onClick={handleDoPress}
-                disabled={isSending}
-                className="relative w-56 h-56 sm:w-64 sm:h-64 rounded-full bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 active:scale-95 disabled:opacity-50 text-white font-black text-5xl sm:text-6xl tracking-wider shadow-2xl shadow-purple-900/60 flex flex-col items-center justify-center gap-2 border-4 border-purple-400/40 transition"
+                className="relative w-60 h-60 sm:w-68 sm:h-68 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-6xl sm:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
               >
-                {isSending ? (
-                  <RefreshCw className="w-16 h-16 animate-spin" />
-                ) : (
-                  <>
-                    <span>DO</span>
-                    <span className="text-xs uppercase font-bold tracking-widest text-purple-200/80 -mt-1">
-                      Ignition
-                    </span>
-                  </>
-                )}
+                <span>DO</span>
+                <span className="text-xs uppercase font-extrabold tracking-widest text-purple-200/90">
+                  Ignition
+                </span>
               </button>
             </div>
-
-            <p className="mt-8 text-xs text-slate-400 max-w-xs leading-relaxed">
-              {isSending
-                ? 'Connecting to Sheet Doorway...'
-                : 'Tap to ignite. No willpower required.'}
-            </p>
 
             {/* Status Feedback Toast */}
             {status && (
               <div
-                className={`mt-4 px-4 py-3 rounded-xl border text-xs max-w-sm flex items-start gap-2 text-left shadow-lg ${
+                className={`mt-6 px-4 py-2.5 rounded-xl border text-xs max-w-sm flex items-start gap-2 text-left shadow-lg animate-fadeIn ${
                   status.ok
-                    ? 'bg-emerald-950/80 border-emerald-600 text-emerald-200'
-                    : 'bg-rose-950/80 border-rose-600 text-rose-200'
+                    ? 'bg-emerald-950/90 border-emerald-600 text-emerald-200'
+                    : 'bg-rose-950/90 border-rose-600 text-rose-200'
                 }`}
               >
                 {status.ok ? (
@@ -234,7 +223,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
       {/* Bottom hint */}
       <div className="text-center text-[11px] text-slate-500 pb-1">
-        Focus Action Layer · Phase 1: Foundations
+        Focus Action Layer · Phase 2: Offline Data Layer
       </div>
     </div>
   );

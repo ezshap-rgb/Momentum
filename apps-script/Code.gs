@@ -6,14 +6,8 @@
  * 1. Open your Google Sheet ("Focus App Data")
  * 2. Go to Extensions -> Apps Script
  * 3. Replace all content in Code.gs with this file
- * 4. Run `setupHeadersAndSettings()` once from the editor to create headers & default settings.
- * 5. Deploy -> New deployment -> Select type: "Web app"
- *    - Description: "Focus App Doorway v1"
- *    - Execute as: "Me" (your Google account)
- *    - Who has access: "Anyone"
- * 6. Copy the Web App URL and set a secret key in Project Settings -> Script Properties:
- *    Property: FOCUS_SECRET_KEY
- *    Value: <Any long random string of your choice>
+ * 4. Run `setupHeadersAndSettings()` once from the editor to ensure headers & settings are complete.
+ * 5. Deploy -> Manage deployments -> Edit -> New version -> Deploy.
  */
 
 function getSecretKey() {
@@ -26,7 +20,7 @@ function getSpreadsheet() {
 }
 
 /**
- * One-time setup: generates the standard headers for all 6 tabs
+ * One-time setup / check: generates headers for all 6 tabs
  * and fills Settings with starting defaults from docs/DATA_MODEL.md
  */
 function setupHeadersAndSettings() {
@@ -158,10 +152,19 @@ function setupHeadersAndSettings() {
 }
 
 /**
- * Handle POST requests (appending rows)
- * Watch out note: Uses plain text body and standard response to avoid CORS issues
+ * Handle POST requests (appending events or batches of events)
+ * Includes LockService write lock and event_id duplicate deduplication
  */
 function doPost(e) {
+  // Use a script lock to prevent race conditions across simultaneous writes
+  const lock = LockService.getScriptLock();
+  try {
+    // Wait up to 10 seconds to acquire the lock
+    lock.waitLock(10000);
+  } catch (lockErr) {
+    return jsonResponse({ ok: false, error: 'Server busy: could not acquire write lock' }, 503);
+  }
+
   try {
     if (!e || !e.postData || !e.postData.contents) {
       return jsonResponse({ ok: false, error: 'Missing request body' }, 400);
@@ -175,6 +178,23 @@ function doPost(e) {
     }
 
     const action = data.action;
+    const ss = getSpreadsheet();
+    const sheet = ss.getSheetByName('Events');
+    if (!sheet) {
+      return jsonResponse({ ok: false, error: 'Events tab not found' }, 500);
+    }
+
+    // Read existing event_ids to guarantee deduplication
+    const lastRow = sheet.getLastRow();
+    const existingIds = new Set();
+    if (lastRow > 1) {
+      const idValues = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < idValues.length; i++) {
+        if (idValues[i][0]) {
+          existingIds.add(String(idValues[i][0]));
+        }
+      }
+    }
 
     if (action === 'append_event') {
       const event = data.event;
@@ -182,10 +202,9 @@ function doPost(e) {
         return jsonResponse({ ok: false, error: 'Invalid event payload' }, 400);
       }
 
-      const ss = getSpreadsheet();
-      const sheet = ss.getSheetByName('Events');
-      if (!sheet) {
-        return jsonResponse({ ok: false, error: 'Events tab not found' }, 500);
+      // Duplicate protection: if already present, return success immediately without adding second row
+      if (existingIds.has(String(event.event_id))) {
+        return jsonResponse({ ok: true, message: 'Event already recorded (deduplicated)', event_id: event.event_id });
       }
 
       const row = [
@@ -201,10 +220,56 @@ function doPost(e) {
       return jsonResponse({ ok: true, message: 'Event recorded', event_id: event.event_id });
     }
 
+    if (action === 'batch_events') {
+      const events = data.events;
+      if (!Array.isArray(events) || events.length === 0) {
+        return jsonResponse({ ok: false, error: 'No events array provided' }, 400);
+      }
+
+      const rowsToAppend = [];
+      const appendedIds = [];
+      const skippedIds = [];
+
+      for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        if (!ev || !ev.event_id || !ev.type) continue;
+        const strId = String(ev.event_id);
+        if (existingIds.has(strId)) {
+          skippedIds.push(strId);
+          continue;
+        }
+
+        existingIds.add(strId);
+        rowsToAppend.push([
+          ev.event_id,
+          ev.timestamp || new Date().toISOString(),
+          ev.device || 'web',
+          ev.type,
+          typeof ev.payload === 'object' ? JSON.stringify(ev.payload) : (ev.payload || ''),
+          ev.schema_version || '1.0'
+        ]);
+        appendedIds.push(strId);
+      }
+
+      if (rowsToAppend.length > 0) {
+        sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, 6).setValues(rowsToAppend);
+      }
+
+      return jsonResponse({
+        ok: true,
+        message: 'Batch processed',
+        appended_count: appendedIds.length,
+        skipped_count: skippedIds.length,
+        appended_ids: appendedIds
+      });
+    }
+
     return jsonResponse({ ok: false, error: 'Unknown action: ' + action }, 400);
 
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() }, 500);
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -230,7 +295,7 @@ function doGet(e) {
 
     const data = sheet.getDataRange().getValues();
     if (data.length <= 1) {
-      return jsonResponse({ ok: true, tab: tab, rows: [] });
+      return jsonResponse({ ok: true, tab: tab, count: 0, rows: [] });
     }
 
     const headers = data[0];
