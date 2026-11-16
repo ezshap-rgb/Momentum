@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useMomentum } from '../context/MomentumContext';
+import { SettingsModal } from './SettingsModal';
 import {
   getStoredCredentials,
   saveCredentials,
@@ -28,6 +29,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [showConfig, setShowConfig] = useState(false);
+  const [showMomentumSettings, setShowMomentumSettings] = useState(false);
   const [saved, setSaved] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -202,7 +204,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between pt-2 border-b border-slate-800 pb-3">
                 <button
                   type="submit"
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-500 active:scale-95 text-xs font-bold rounded-lg text-white transition"
@@ -218,6 +220,22 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                   className="text-xs text-purple-300 hover:text-purple-200 font-medium"
                 >
                   Save & Back to DO
+                </button>
+              </div>
+
+              {/* Link to Full Momentum & Google Tasks Settings */}
+              <div className="pt-2 flex items-center justify-between">
+                <span className="text-[11px] text-slate-400">Momentum App Settings</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfig(false);
+                    setShowMomentumSettings(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition"
+                >
+                  <Settings className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Open Full Settings</span>
                 </button>
               </div>
             </form>
@@ -248,6 +266,11 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
           )}
         </button>
       </div>
+
+      {/* Momentum Full Settings Modal */}
+      {showMomentumSettings && (
+        <SettingsModal onClose={() => setShowMomentumSettings(false)} />
+      )}
     </div>
   );
 }
