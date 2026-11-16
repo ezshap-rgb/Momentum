@@ -798,53 +798,28 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                 {(() => {
                   const upper = pairedCandidates[0];
                   const act = upper.action;
-                  const fric = Number(act.friction) || 2;
-                  const partSize = getPartSizeForFriction(fric);
-                  const workVal = calculateWorkValue(fric, act.importance);
-                  const finishGrade = calculateFinishGrade(act.due_date, act.created_at);
 
                   return (
                     <div
                       key={act.task_id}
                       onClick={() => handleSelectUpperPaired(upper)}
-                      className="bg-slate-900/95 border-2 border-purple-500/40 hover:border-purple-400 p-4 sm:p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group relative overflow-hidden"
+                      className="bg-slate-900/95 border-2 border-purple-500/40 hover:border-purple-400 p-6 sm:p-7 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center cursor-pointer active:scale-[0.98] transition group relative overflow-hidden min-h-[145px] sm:min-h-[160px]"
                     >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[10px] font-bold">
-                              Friction {act.friction}/5
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
-                              More Reward (+{workVal} pts)
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                            <WatchPartVector partSize={partSize} finishGrade={finishGrade} isFilled={true} />
-                            <span className="text-[10px] font-bold text-amber-300 capitalize">
-                              {finishGrade} {partSize}
-                            </span>
-                          </div>
-                        </div>
-
-                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition my-1.5">
-                          {act.title}
-                        </h3>
-
-                        {act.project_title && (
-                          <div className="text-[11px] text-purple-400 font-semibold mb-2">
-                            📁 {act.project_title}
-                          </div>
-                        )}
+                      <div className="mb-2.5">
+                        <span className="px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-600/60 text-emerald-300 text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+                          More reward
+                        </span>
                       </div>
 
-                      <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-400">{formatTimeBucket(act.time_bucket)}</span>
-                        <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
-                          <span>Select & Start</span>
-                          <Play className="w-3.5 h-3.5 fill-current" />
+                      <h3 className="text-lg sm:text-xl font-black text-white leading-snug group-hover:text-purple-200 transition max-w-md">
+                        {act.title}
+                      </h3>
+
+                      {act.project_title && (
+                        <div className="text-xs text-purple-400 font-semibold mt-2">
+                          📁 {act.project_title}
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -853,53 +828,28 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                 {(() => {
                   const lower = pairedCandidates[1];
                   const act = lower.action;
-                  const fric = Number(act.friction) || 2;
-                  const partSize = getPartSizeForFriction(fric);
-                  const workVal = calculateWorkValue(fric, act.importance);
-                  const finishGrade = calculateFinishGrade(act.due_date, act.created_at);
 
                   return (
                     <div
                       key={act.task_id}
                       onClick={() => handleSelectLowerPaired(lower)}
-                      className="bg-slate-900/95 border-2 border-slate-700/60 hover:border-purple-400 p-4 sm:p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group relative overflow-hidden"
+                      className="bg-slate-900/95 border-2 border-slate-700/60 hover:border-purple-400 p-6 sm:p-7 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center cursor-pointer active:scale-[0.98] transition group relative overflow-hidden min-h-[145px] sm:min-h-[160px]"
                     >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold">
-                              Friction {act.friction}/5
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-700/60 text-indigo-300 text-[10px] font-bold uppercase tracking-wider">
-                              Easier Entry (+{workVal} pts)
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                            <WatchPartVector partSize={partSize} finishGrade={finishGrade} isFilled={true} />
-                            <span className="text-[10px] font-bold text-amber-300 capitalize">
-                              {finishGrade} {partSize}
-                            </span>
-                          </div>
-                        </div>
-
-                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition my-1.5">
-                          {act.title}
-                        </h3>
-
-                        {act.project_title && (
-                          <div className="text-[11px] text-purple-400 font-semibold mb-2">
-                            📁 {act.project_title}
-                          </div>
-                        )}
+                      <div className="mb-2.5">
+                        <span className="px-3 py-1 rounded-full bg-indigo-950/80 border border-indigo-600/60 text-indigo-300 text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+                          Easier
+                        </span>
                       </div>
 
-                      <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-400">{formatTimeBucket(act.time_bucket)}</span>
-                        <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
-                          <span>Select & Start</span>
-                          <Play className="w-3.5 h-3.5 fill-current" />
+                      <h3 className="text-lg sm:text-xl font-black text-white leading-snug group-hover:text-purple-200 transition max-w-md">
+                        {act.title}
+                      </h3>
+
+                      {act.project_title && (
+                        <div className="text-xs text-purple-400 font-semibold mt-2">
+                          📁 {act.project_title}
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })()}
