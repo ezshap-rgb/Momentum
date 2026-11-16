@@ -5,7 +5,13 @@ import { CandidateInspectorModal } from './CandidateInspectorModal';
 import { DayMovementBenchModal } from './DayMovementBenchModal';
 import { DayCommitmentPromptModal } from './DayCommitmentPromptModal';
 import { ExperimentsModal } from './ExperimentsModal';
+import { SetupGuideModal } from './SetupGuideModal';
 import { WatchPartVector } from './WatchPartVector';
+import {
+  setWakeLockActive,
+  playGentleCompletionChime,
+  triggerHaptic,
+} from '../services/focusWakeLock';
 import {
   DayModule,
   DayCommitmentLevel,
@@ -70,6 +76,7 @@ import {
   Unlock,
   AlertTriangle,
   Layers,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -142,9 +149,22 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   });
   const [pairedCandidates, setPairedCandidates] = useState<[CandidateScore, CandidateScore] | null>(null);
   const [showExperimentsModal, setShowExperimentsModal] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [targetOverrideMode, setTargetOverrideMode] = useState<ServeMode>('paired');
   const neitherTimeoutRef = useRef<number | null>(null);
+
+  // Screen wake lock during ignition and action execution
+  useEffect(() => {
+    if (stage === 'ignition' || stage === 'action_running') {
+      setWakeLockActive(true);
+    } else {
+      setWakeLockActive(false);
+    }
+    return () => {
+      setWakeLockActive(false);
+    };
+  }, [stage]);
 
   // Current served action
   const [currentAction, setCurrentAction] = useState<FocusAction | null>(null);
@@ -492,10 +512,9 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         earned_at: new Date().toISOString(),
       };
 
-      // Vibrate if supported
-      if ('vibrate' in navigator) {
-        try { navigator.vibrate(60); } catch (_) {}
-      }
+      // Phase 10: Audio completion chime & haptic feedback
+      playGentleCompletionChime();
+      triggerHaptic([60, 40, 60]);
 
       await queueEvent('part_earned', {
         part: newPart,
@@ -1121,6 +1140,22 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                 </div>
               </div>
 
+              {/* Phase 10: Setup Guide (Battery, Calendar Nudges & Drive Backups) */}
+              <div className="pt-2 flex items-center justify-between border-b border-slate-800 pb-3">
+                <span className="text-[11px] text-slate-400">Offline, Nudges & Backups</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfig(false);
+                    setShowSetupGuide(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Setup Guide</span>
+                </button>
+              </div>
+
               {/* Full Momentum Settings Link */}
               <div className="pt-2 flex items-center justify-between border-b border-slate-800 pb-3">
                 <span className="text-[11px] text-slate-400">Momentum App Settings</span>
@@ -1284,6 +1319,14 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
           isOpen={showExperimentsModal}
           onClose={() => setShowExperimentsModal(false)}
           onServingModeChanged={(newMode) => setServingMode(newMode)}
+        />
+      )}
+
+      {/* Setup Guide Modal (Phase 10) */}
+      {showSetupGuide && (
+        <SetupGuideModal
+          isOpen={showSetupGuide}
+          onClose={() => setShowSetupGuide(false)}
         />
       )}
 

@@ -641,6 +641,16 @@ function doPost(e) {
       return jsonResponse({ ok: true, message: 'Ingestion and folding triggered' });
     }
 
+    if (action === 'sync_calendar_nudges') {
+      const res = scheduleCalendarNudges();
+      return jsonResponse({ ok: true, message: 'Calendar nudges scheduled', created_count: res.createdCount });
+    }
+
+    if (action === 'run_backup') {
+      const res = weeklySpreadsheetBackup();
+      return jsonResponse({ ok: true, message: 'Spreadsheet backed up', backup_name: res.name });
+    }
+
     return jsonResponse({ ok: false, error: 'Unknown action: ' + action }, 400);
 
   } catch (err) {
@@ -693,4 +703,197 @@ function doGet(e) {
 function jsonResponse(obj, status) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Phase 10: Google Calendar Nudges
+ * Manages calendar named 'Focus' and schedules reminder events for the next 7 days:
+ * - Morning circuit window (08:30)
+ * - Evening circuit window (19:30)
+ * - External deadline tripwires (due on date)
+ * - Capped at max 3 per day, quiet hours respected (08:00 - 21:30)
+ * - On Friday & Saturday, only same-day external deadlines
+ */
+function scheduleCalendarNudges() {
+  const calName = 'Focus';
+  let cal;
+  const cals = CalendarApp.getCalendarsByName(calName);
+  if (cals.length > 0) {
+    cal = cals[0];
+  } else {
+    cal = CalendarApp.createCalendar(calName, {
+      summary: 'Focus app reminders and circuit window nudges'
+    });
+  }
+
+  const now = new Date();
+  const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  // Clear previous automated events in next 7 days to avoid duplicates
+  const existingEvents = cal.getEvents(now, sevenDaysLater);
+  for (const ev of existingEvents) {
+    if (ev.getDescription().indexOf('FOCUS_APP_NUDGE') !== -1) {
+      ev.deleteEvent();
+    }
+  }
+
+  const ss = getSpreadsheet();
+  const actionsSheet = ss.getSheetByName('Actions');
+  const externalDeadlines = [];
+
+  if (actionsSheet && actionsSheet.getLastRow() > 1) {
+    const data = actionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const dueCol = headers.indexOf('due_date');
+    const kindCol = headers.indexOf('deadline_kind');
+    const titleCol = headers.indexOf('title');
+    const statusCol = headers.indexOf('status');
+
+    for (let i = 1; i < data.length; i++) {
+      const status = data[i][statusCol];
+      const kind = data[i][kindCol];
+      const due = data[i][dueCol];
+      if (status !== 'done' && kind === 'external' && due) {
+        externalDeadlines.push({
+          title: data[i][titleCol],
+          dueDate: String(due).split('T')[0]
+        });
+      }
+    }
+  }
+
+  let createdCount = 0;
+  const appUrl = ScriptApp.getService().getUrl() || 'https://github.com/ezshap-rgb/Momentum';
+
+  for (let d = 0; d < 7; d++) {
+    const targetDate = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
+    const dayOfWeek = targetDate.getDay(); // 0: Sun, 5: Fri, 6: Sat
+    const isOffDay = (dayOfWeek === 5 || dayOfWeek === 6);
+    const dateStr = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    let dailyCount = 0;
+
+    // 1. External Hard Deadline Tripwires
+    const dueToday = externalDeadlines.filter(x => x.dueDate === dateStr);
+    for (const item of dueToday) {
+      if (dailyCount >= 3) break;
+      const start = new Date(targetDate);
+      start.setHours(9, 0, 0, 0);
+      const end = new Date(targetDate);
+      end.setHours(9, 15, 0, 0);
+
+      const ev = cal.createEvent(`Focus Tripwire: ${item.title}`, start, end, {
+        description: `⚡ External Hard Deadline Due Today!\n\nOpen Focus App: ${appUrl}\n\n[FOCUS_APP_NUDGE]`
+      });
+      ev.addPopupReminder(5);
+      createdCount++;
+      dailyCount++;
+    }
+
+    // On off days (Fri & Sat), skip circuits and DO nudges
+    if (isOffDay) continue;
+
+    // 2. Morning Circuit Window (08:30 - 08:45)
+    if (dailyCount < 3) {
+      const mStart = new Date(targetDate);
+      mStart.setHours(8, 30, 0, 0);
+      const mEnd = new Date(targetDate);
+      mEnd.setHours(8, 45, 0, 0);
+
+      const ev = cal.createEvent('Focus: Morning Circuit Window', mStart, mEnd, {
+        description: `Push-ups, squats, plank, hip mobility.\n\nOpen Focus App to Start: ${appUrl}\n\n[FOCUS_APP_NUDGE]`
+      });
+      ev.addPopupReminder(5);
+      createdCount++;
+      dailyCount++;
+    }
+
+    // 3. Evening Circuit Window (19:30 - 19:45)
+    if (dailyCount < 3) {
+      const eStart = new Date(targetDate);
+      eStart.setHours(19, 30, 0, 0);
+      const eEnd = new Date(targetDate);
+      eEnd.setHours(19, 45, 0, 0);
+
+      const ev = cal.createEvent('Focus: Evening Circuit Window', eStart, eEnd, {
+        description: `Pull-ups, crunches, reverse plank.\n\nOpen Focus App to Start: ${appUrl}\n\n[FOCUS_APP_NUDGE]`
+      });
+      ev.addPopupReminder(5);
+      createdCount++;
+      dailyCount++;
+    }
+  }
+
+  Logger.log(`Created ${createdCount} calendar nudges.`);
+  return { createdCount };
+}
+
+/**
+ * Phase 10: Weekly Automated Sheet Backup in Google Drive
+ * Saves a dated copy to folder 'Focus Backups' and prunes older ones keeping the last 8.
+ */
+function weeklySpreadsheetBackup() {
+  const folderName = 'Focus Backups';
+  let folder;
+  const folders = DriveApp.getFoldersByName(folderName);
+  if (folders.hasNext()) {
+    folder = folders.next();
+  } else {
+    folder = DriveApp.createFolder(folderName);
+  }
+
+  const ss = getSpreadsheet();
+  const fileId = ss.getId();
+  const file = DriveApp.getFileById(fileId);
+
+  const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const backupName = `Focus_Backup_${dateStr}`;
+  const backupFile = file.makeCopy(backupName, folder);
+
+  // Prune older backups keeping newest 8
+  const allBackups = [];
+  const filesIter = folder.getFiles();
+  while (filesIter.hasNext()) {
+    allBackups.push(filesIter.next());
+  }
+
+  allBackups.sort((a, b) => b.getDateCreated().getTime() - a.getDateCreated().getTime());
+
+  if (allBackups.length > 8) {
+    for (let i = 8; i < allBackups.length; i++) {
+      allBackups[i].setTrashed(true);
+    }
+  }
+
+  Logger.log(`Created backup ${backupName}. Retaining ${Math.min(8, allBackups.length)} backups.`);
+  return { name: backupName, id: backupFile.getId() };
+}
+
+/**
+ * Helper to install Phase 10 daily nudge & weekly backup triggers
+ */
+function installPhase10Triggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const t of triggers) {
+    const fn = t.getHandlerFunction();
+    if (fn === 'scheduleCalendarNudges' || fn === 'weeklySpreadsheetBackup') {
+      ScriptApp.deleteTrigger(t);
+    }
+  }
+
+  // Daily calendar nudge schedule at 06:00 AM
+  ScriptApp.newTrigger('scheduleCalendarNudges')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .create();
+
+  // Weekly backup on Sundays at 02:00 AM
+  ScriptApp.newTrigger('weeklySpreadsheetBackup')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.SUNDAY)
+    .atHour(2)
+    .create();
+
+  Logger.log('Installed daily calendar nudge trigger and weekly backup trigger.');
 }
