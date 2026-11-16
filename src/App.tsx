@@ -8,6 +8,7 @@ import { ProjectsPanel } from './components/panels/ProjectsPanel';
 import { CalendarPanel } from './components/CalendarPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { VoiceIngestionModal } from './components/VoiceIngestionModal';
+import { Phase1TestScreen } from './components/Phase1TestScreen';
 import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 
 function CockpitDashboard() {
@@ -265,6 +266,13 @@ function CockpitDashboard() {
 }
 
 export default function App() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const [mode, setMode] = useState<string | null>(urlParams.get('mode'));
+
+  if (mode === 'do' || mode === 'test' || mode === 'phase1') {
+    return <Phase1TestScreen onBackToCockpit={() => setMode(null)} />;
+  }
+
   return (
     <MomentumProvider>
       <CockpitDashboard />

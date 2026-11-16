@@ -14,6 +14,7 @@ import {
   RefreshCw,
   CheckCircle2,
   Undo2,
+  Zap,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -265,6 +266,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
           )}
 
           {/* Settings Modal */}
+          <button
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('mode', 'do');
+              window.location.href = url.toString();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs shadow-purple-600/30 transition"
+            title="Open Focus / DO Action Layer (Phase 1 Test Screen)"
+          >
+            <Zap className="w-3.5 h-3.5 fill-current" />
+            <span>DO</span>
+          </button>
+
           <button
             onClick={onOpenSettings}
             className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition"
