@@ -6,12 +6,18 @@ import { DayMovementBenchModal } from './DayMovementBenchModal';
 import { DayCommitmentPromptModal } from './DayCommitmentPromptModal';
 import { ExperimentsModal } from './ExperimentsModal';
 import { SetupGuideModal } from './SetupGuideModal';
+import { WatchCollectionModal } from './WatchCollectionModal';
+import { FridaySummaryModal } from './FridaySummaryModal';
 import { WatchPartVector } from './WatchPartVector';
 import {
   setWakeLockActive,
   playGentleCompletionChime,
   triggerHaptic,
 } from '../services/focusWakeLock';
+import {
+  recordOffDayPolish,
+  isFridayMorning,
+} from '../services/focusCollection';
 import {
   DayModule,
   DayCommitmentLevel,
@@ -77,6 +83,7 @@ import {
   AlertTriangle,
   Layers,
   ShieldCheck,
+  Watch,
 } from 'lucide-react';
 
 interface Props {
@@ -150,6 +157,8 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [pairedCandidates, setPairedCandidates] = useState<[CandidateScore, CandidateScore] | null>(null);
   const [showExperimentsModal, setShowExperimentsModal] = useState(false);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [showFridaySummary, setShowFridaySummary] = useState(() => isFridayMorning());
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [targetOverrideMode, setTargetOverrideMode] = useState<ServeMode>('paired');
   const neitherTimeoutRef = useRef<number | null>(null);
@@ -516,6 +525,12 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       playGentleCompletionChime();
       triggerHaptic([60, 40, 60]);
 
+      // Phase 11: If completing on Friday or Saturday (off days), record polish upgrades!
+      const dayOfWeek = new Date().getDay();
+      if (dayOfWeek === 5 || dayOfWeek === 6) {
+        recordOffDayPolish(workVal);
+      }
+
       await queueEvent('part_earned', {
         part: newPart,
         work_value: workVal,
@@ -601,6 +616,16 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span className="hidden xs:inline">Bench</span>
+          </button>
+
+          {/* Watchmaker Collection Vault Button (Phase 11) */}
+          <button
+            onClick={() => setShowCollectionModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-bold text-purple-300 transition shadow-xs"
+            title="Open Watchmaker's Collection (Crafted Timepieces)"
+          >
+            <Watch className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden xs:inline">Vault</span>
           </button>
 
           {/* 4-Week Serving Experiment Modal Button */}
@@ -1301,6 +1326,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
             });
             setShowBenchModal(false);
           }}
+          onOpenCollection={() => setShowCollectionModal(true)}
           onClose={() => setShowBenchModal(false)}
         />
       )}
@@ -1327,6 +1353,26 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         <SetupGuideModal
           isOpen={showSetupGuide}
           onClose={() => setShowSetupGuide(false)}
+        />
+      )}
+
+      {/* Watch Collection Vault Modal (Phase 11) */}
+      {showCollectionModal && (
+        <WatchCollectionModal
+          isOpen={showCollectionModal}
+          onClose={() => setShowCollectionModal(false)}
+        />
+      )}
+
+      {/* Friday Morning Week Reflection Modal (Phase 11) */}
+      {showFridaySummary && (
+        <FridaySummaryModal
+          isOpen={showFridaySummary}
+          onClose={() => setShowFridaySummary(false)}
+          onOpenCollection={() => {
+            setShowFridaySummary(false);
+            setShowCollectionModal(true);
+          }}
         />
       )}
 

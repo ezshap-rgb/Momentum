@@ -7,13 +7,14 @@ import {
 import { loadHabitsState } from '../services/focusHabits';
 import { WatchPartVector } from './WatchPartVector';
 import { GearTrainWidget } from './GearTrainWidget';
-import { Sparkles, Trophy, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Sparkles, Trophy, CheckCircle2, RotateCcw, Watch } from 'lucide-react';
 
 interface Props {
   module: DayModule;
   onCommitChange: (level: DayCommitmentLevel) => void;
   onFreshStart: () => void;
   onClose: () => void;
+  onOpenCollection?: () => void;
 }
 
 export function DayMovementBenchModal({
@@ -21,6 +22,7 @@ export function DayMovementBenchModal({
   onCommitChange,
   onFreshStart,
   onClose,
+  onOpenCollection,
 }: Props) {
   const habits = loadHabitsState();
   // Slots revealed = floor(10 * work_done / committed_level), capped at 10
@@ -126,9 +128,25 @@ export function DayMovementBenchModal({
         </div>
 
         {/* 7-Gear Train (Habits & Power Reserve) */}
-        <div className="mb-6">
+        <div className="mb-4">
           <GearTrainWidget habits={habits} />
         </div>
+
+        {/* View Collection Vault */}
+        {onOpenCollection && (
+          <div className="mb-5">
+            <button
+              onClick={() => {
+                onClose();
+                onOpenCollection();
+              }}
+              className="w-full py-2.5 px-3 rounded-2xl bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800 text-purple-200 text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs"
+            >
+              <Watch className="w-4 h-4 text-purple-400" />
+              <span>View Watchmaker's Collection Vault</span>
+            </button>
+          </div>
+        )}
 
         {/* Fresh Start Button (Zero guilt recovery) */}
         <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
