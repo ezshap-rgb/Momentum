@@ -33,6 +33,11 @@ import {
   CandidateScore,
   SessionContext,
 } from '../services/focusAlgorithm';
+import {
+  creditHabitFromIgnition,
+  getWeightedIgnitionPick,
+  addPowerReserve,
+} from '../services/focusHabits';
 import { SyncIndicator } from './SyncIndicator';
 import {
   Zap,
@@ -190,9 +195,12 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
   };
 
   const proceedToIgnition = async () => {
-    const nextEx = pickNextExercise(currentExercise.name);
+    // Phase 7: Weighted ignition pick favoring habits with quota left
+    const nextEx = getWeightedIgnitionPick(currentExercise.name);
     setCurrentExercise(nextEx);
     setStage('ignition');
+    addPowerReserve(2); // +2 winding ticks per DO press
+
     await queueEvent('ignition_offered', {
       exercise: nextEx.name,
       targetReps: nextEx.reps,
@@ -242,9 +250,13 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
   // 3. ZERO-TAP BRIDGE: Finish Ignition -> Immediately show Offer
   const handleIgnitionDone = async () => {
+    // Phase 7: Credit matching habit quota directly!
+    creditHabitFromIgnition(currentExercise.name, currentExercise.reps);
+
     await queueEvent('ignition_done', {
       exercise: currentExercise.name,
       reps: currentExercise.reps,
+      credited_habit: true,
     });
 
     serveNextOffer(consecutiveNotNows);

@@ -4,7 +4,9 @@ import {
   DayCommitmentLevel,
   COMMITMENT_POINTS,
 } from '../services/focusMovement';
+import { loadHabitsState } from '../services/focusHabits';
 import { WatchPartVector } from './WatchPartVector';
+import { GearTrainWidget } from './GearTrainWidget';
 import { Sparkles, Trophy, CheckCircle2, RotateCcw } from 'lucide-react';
 
 interface Props {
@@ -20,6 +22,7 @@ export function DayMovementBenchModal({
   onFreshStart,
   onClose,
 }: Props) {
+  const habits = loadHabitsState();
   // Slots revealed = floor(10 * work_done / committed_level), capped at 10
   const slotsRevealed = Math.min(10, Math.floor((10 * module.total_work_done) / module.committed_work_points));
 
@@ -101,7 +104,7 @@ export function DayMovementBenchModal({
         </div>
 
         {/* Stretch Jewels (Reward for going beyond committed floor) */}
-        <div className="mb-6">
+        <div className="mb-5">
           <div className="flex items-center justify-between text-xs font-bold text-slate-400 mb-2">
             <span className="flex items-center gap-1.5">
               <Trophy className="w-3.5 h-3.5 text-rose-400" />
@@ -120,6 +123,11 @@ export function DayMovementBenchModal({
               />
             ))}
           </div>
+        </div>
+
+        {/* 7-Gear Train (Habits & Power Reserve) */}
+        <div className="mb-6">
+          <GearTrainWidget habits={habits} />
         </div>
 
         {/* Fresh Start Button (Zero guilt recovery) */}
