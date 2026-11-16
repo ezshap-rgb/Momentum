@@ -15,15 +15,22 @@ import {
   CheckCircle2,
   Undo2,
   Zap,
+  Layers,
 } from 'lucide-react';
 
 interface HeaderProps {
   onOpenSettings: () => void;
   onOpenVoiceIngest: () => void;
   onOpenDoMode?: () => void;
+  onOpenPlanMode?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceIngest, onOpenDoMode }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onOpenSettings,
+  onOpenVoiceIngest,
+  onOpenDoMode,
+  onOpenPlanMode,
+}) => {
   const {
     settings,
     toggleTheme,
@@ -127,6 +134,18 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenVoiceInges
             <Zap className="w-3.5 h-3.5 fill-current" />
             <span>DO</span>
           </button>
+
+          {/* Plan Mode Button */}
+          {onOpenPlanMode && (
+            <button
+              onClick={onOpenPlanMode}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-purple-600 dark:text-purple-300 border border-purple-500/30 transition shrink-0 active:scale-95"
+              title="Open Plan Mode (Calm Review, Pool & Settings)"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Plan</span>
+            </button>
+          )}
 
           {/* Prominent Google Tasks Sync Button (Visible everywhere) */}
           <button

@@ -10,9 +10,10 @@ import { SettingsModal } from './components/SettingsModal';
 import { VoiceIngestionModal } from './components/VoiceIngestionModal';
 import { Phase1TestScreen } from './components/Phase1TestScreen';
 import { DoMainScreen } from './components/DoMainScreen';
+import { PlanModeScreen } from './components/PlanModeScreen';
 import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 
-function CockpitDashboard({ onOpenDoMode }: { onOpenDoMode?: () => void }) {
+function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () => void; onOpenPlanMode?: () => void }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -84,6 +85,7 @@ function CockpitDashboard({ onOpenDoMode }: { onOpenDoMode?: () => void }) {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenVoiceIngest={() => setIsVoiceOpen(true)}
         onOpenDoMode={onOpenDoMode}
+        onOpenPlanMode={onOpenPlanMode}
       />
 
       {/* Main Cockpit: Zero window scrolling, strictly locked to viewport */}
@@ -269,21 +271,36 @@ function CockpitDashboard({ onOpenDoMode }: { onOpenDoMode?: () => void }) {
 
 export default function App() {
   const urlParams = new URLSearchParams(window.location.search);
-  // Default is 'do' mode as requested! Task view is available via toggle.
-  const initialMode = urlParams.get('mode') || localStorage.getItem('focus_current_view') || 'do';
-  const [currentView, setCurrentView] = useState<'do' | 'tasks'>(initialMode === 'tasks' ? 'tasks' : 'do');
+  // Default is 'do' mode! Plan mode and Task view are available via toggle.
+  const initialMode = (urlParams.get('mode') as 'do' | 'plan' | 'tasks') ||
+    (localStorage.getItem('focus_current_view') as 'do' | 'plan' | 'tasks') ||
+    'do';
+  const [currentView, setCurrentView] = useState<'do' | 'plan' | 'tasks'>(initialMode);
 
-  const setView = (view: 'do' | 'tasks') => {
+  const setView = (view: 'do' | 'plan' | 'tasks') => {
     setCurrentView(view);
     localStorage.setItem('focus_current_view', view);
   };
 
   return (
     <MomentumProvider>
-      {currentView === 'do' ? (
-        <DoMainScreen onOpenTaskView={() => setView('tasks')} />
-      ) : (
-        <CockpitDashboard onOpenDoMode={() => setView('do')} />
+      {currentView === 'do' && (
+        <DoMainScreen
+          onOpenTaskView={() => setView('tasks')}
+          onOpenPlanMode={() => setView('plan')}
+        />
+      )}
+      {currentView === 'plan' && (
+        <PlanModeScreen
+          onOpenDoMode={() => setView('do')}
+          onOpenTaskView={() => setView('tasks')}
+        />
+      )}
+      {currentView === 'tasks' && (
+        <CockpitDashboard
+          onOpenDoMode={() => setView('do')}
+          onOpenPlanMode={() => setView('plan')}
+        />
       )}
     </MomentumProvider>
   );

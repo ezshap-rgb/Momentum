@@ -69,15 +69,17 @@ import {
   Lock,
   Unlock,
   AlertTriangle,
+  Layers,
 } from 'lucide-react';
 
 interface Props {
   onOpenTaskView: () => void;
+  onOpenPlanMode?: () => void;
 }
 
 type DoStage = 'do_button' | 'ignition' | 'offer' | 'action_running';
 
-export function DoMainScreen({ onOpenTaskView }: Props) {
+export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const { settings, toggleTheme } = useMomentum();
 
   // Navigation / Modal States
@@ -593,6 +595,17 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
           </button>
 
           <SyncIndicator />
+
+          {onOpenPlanMode && (
+            <button
+              onClick={onOpenPlanMode}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-semibold text-purple-300 transition shadow-sm"
+              title="Open Plan Mode (Calm Review, Pool & Settings)"
+            >
+              <Layers className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden xs:inline">Plan</span>
+            </button>
+          )}
 
           <button
             onClick={onOpenTaskView}
