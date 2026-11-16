@@ -122,3 +122,33 @@ export function pickBestAction(
 
   return sorted[0];
 }
+
+/**
+ * Formats time bucket safely, suppressing unformatted ISO date strings (e.g. 2026-05-19T21:00:00.000Z)
+ * and normalizing duration strings.
+ */
+export function formatTimeBucket(val?: string): string {
+  if (!val) return '10-20m';
+  const s = String(val).trim();
+  if (!s) return '10-20m';
+
+  // Check if it looks like an ISO date or timestamp (e.g. 2026-05-19T... or 2026-05-19)
+  if (s.includes('T') || s.includes('Z') || /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return '10-20m';
+  }
+
+  // If Date.parse succeeds and there are no duration markers (m, h, min), treat as date and sanitize
+  if (!/[mh]/i.test(s) && !isNaN(Date.parse(s)) && s.length > 7) {
+    return '10-20m';
+  }
+
+  // Standardize sheet bucket strings
+  const lower = s.toLowerCase();
+  if (lower === 'under 5') return '< 5m';
+  if (lower === '5-20') return '5-20m';
+  if (lower === '20-60') return '20-45m';
+  if (lower === 'over 60') return '45m+';
+
+  return s;
+}
+

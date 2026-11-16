@@ -151,6 +151,44 @@ export function computeTargetFriction(
 }
 
 /**
+ * Detects whether an action is a physical exercise habit (e.g. push-ups, squats, crunches, etc.)
+ */
+export function isPhysicalExerciseAction(a: FocusAction): boolean {
+  if (!a) return false;
+  if (a.category === 'habit') return true;
+  if (a.type === 'physical') return true;
+
+  const t = (a.title || '').toLowerCase();
+  if (t.includes('habit:')) return true;
+
+  const exerciseKeywords = [
+    'push-up',
+    'pushup',
+    'push up',
+    'squat',
+    'crunch',
+    'sit-up',
+    'situp',
+    'plank',
+    'jumping jack',
+    'pull-up',
+    'pullup',
+    'pull up',
+    'burpee',
+    'lunge',
+    'workout',
+    'exercise',
+    'exercize',
+    'stretch',
+    'mobility',
+    'yoga',
+    'cardio',
+  ];
+
+  return exerciseKeywords.some((kw) => t.includes(kw));
+}
+
+/**
  * Step 2: Rank Actions and Apply Overrides (Tripwire & Reserved Slot)
  */
 export function rankCandidates(
@@ -168,6 +206,13 @@ export function rankCandidates(
     if (a.category === 'habit') return false;
     if (ctx.skippedTaskIds.has(a.task_id)) return false;
     if (a.snoozed_until && new Date(a.snoozed_until) > now) return false;
+
+    // Rule: Never serve physical exercise as the first action after physical ignition
+    // (Physical ignition breaks inertia; the first action must be an administrative / work responsibility)
+    if (ctx.completedActions.length === 0 && isPhysicalExerciseAction(a)) {
+      return false;
+    }
+
     return true;
   });
 
@@ -177,6 +222,7 @@ export function rankCandidates(
 
   // OVERRIDE 1: TRIPWIRE
   for (const a of available) {
+    if (isPhysicalExerciseAction(a)) continue; // Never trigger tripwires on exercise habits
     if (a.deadline_kind === 'external' && a.due_date) {
       const dueDate = new Date(a.due_date);
       const countingDaysAway = getCountingDaysDifference(now, dueDate, settings.countingDays);
@@ -203,7 +249,7 @@ export function rankCandidates(
   // OVERRIDE 2: RESERVED SLOT
   if (isCountDay && ctx.completedActions.length >= 2 && !ctx.reservedSlotUsedToday) {
     const highImp = available
-      .filter((a) => (a.importance || 'med') === 'high')
+      .filter((a) => !isPhysicalExerciseAction(a) && (a.importance || 'med') === 'high')
       .sort((a, b) => (Number(a.friction) || 2) - (Number(b.friction) || 2));
 
     if (highImp.length > 0) {
@@ -228,15 +274,18 @@ export function rankCandidates(
 
   // SCORING CANDIDATES
   const candidates: CandidateScore[] = available.map((a) => {
-    const rawFriction = Number(a.friction) || 2;
+    const isExercise = isPhysicalExerciseAction(a);
+    // User domain rule: all exercise actions are the easiest, least friction (1/5), lowest reward
+    let rawFriction = isExercise ? 1 : Number(a.friction) || 2;
     const learned = Number(a.learned_adjustment) || 0;
-    const effectiveFriction = Math.max(1, Math.min(5, Math.round(rawFriction + learned)));
+    const effectiveFriction = isExercise ? 1 : Math.max(1, Math.min(5, Math.round(rawFriction + learned)));
+    const candidateAction = isExercise ? { ...a, friction: 1 } : a;
 
     const reasons: string[] = [];
 
     // Urgency Score (0 - 10)
     let urgencyScore = 0;
-    if (a.due_date) {
+    if (a.due_date && !isExercise) {
       const dueDate = new Date(a.due_date);
       const daysAway = getCountingDaysDifference(now, dueDate, settings.countingDays);
       if (daysAway <= 7) {
@@ -250,10 +299,10 @@ export function rankCandidates(
 
     // Importance Score
     let importanceScore = settings.importanceBonusLow;
-    if (a.importance === 'high') {
+    if (!isExercise && a.importance === 'high') {
       importanceScore = settings.importanceBonusHigh;
       reasons.push('High importance');
-    } else if (a.importance === 'med') {
+    } else if (!isExercise && a.importance === 'med') {
       importanceScore = settings.importanceBonusMed;
     }
 
@@ -290,7 +339,7 @@ export function rankCandidates(
     }
 
     return {
-      action: a,
+      action: candidateAction,
       totalScore,
       targetFriction,
       effectiveFriction,

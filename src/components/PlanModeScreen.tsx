@@ -32,7 +32,7 @@ import {
   Eye,
   Sliders,
 } from 'lucide-react';
-import { FocusAction } from '../services/focusServing';
+import { FocusAction, formatTimeBucket } from '../services/focusServing';
 import {
   queueEvent,
   readTabFromSheet,
@@ -652,7 +652,7 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
                               <span className="px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-800/60 text-purple-300 font-bold">
                                 F{act.friction}
                               </span>
-                              <span>{act.time_bucket || '10-20m'}</span>
+                              <span>{formatTimeBucket(act.time_bucket)}</span>
                               {act.importance && (
                                 <span className="capitalize">{act.importance} imp</span>
                               )}
@@ -696,7 +696,7 @@ export const PlanModeScreen: React.FC<PlanModeProps> = ({
                                 F{act.friction}
                               </span>
                               <span className="capitalize">{act.category || 'quick'}</span>
-                              <span>{act.time_bucket || '10-20m'}</span>
+                              <span>{formatTimeBucket(act.time_bucket)}</span>
                               {act.due_date && <span className="text-amber-400">Due {act.due_date}</span>}
                             </div>
                           </div>

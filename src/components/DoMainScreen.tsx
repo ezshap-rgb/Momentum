@@ -40,6 +40,7 @@ import {
   FocusAction,
   IgnitionExercise,
   pickNextExercise,
+  formatTimeBucket,
 } from '../services/focusServing';
 import {
   rankCandidates,
@@ -797,7 +798,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                       </div>
 
                       <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                        <span className="text-[10px] text-slate-400">{formatTimeBucket(act.time_bucket)}</span>
                         <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
                           <span>Select & Start</span>
                           <Play className="w-3.5 h-3.5 fill-current" />
@@ -852,7 +853,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                       </div>
 
                       <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                        <span className="text-[10px] text-slate-400">{formatTimeBucket(act.time_bucket)}</span>
                         <div className="flex items-center gap-1 text-[11px] text-purple-400 font-bold group-hover:translate-x-0.5 transition">
                           <span>Select & Start</span>
                           <Play className="w-3.5 h-3.5 fill-current" />
@@ -888,7 +889,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                     Friction {currentAction.friction}/5
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-medium">
-                    {currentAction.time_bucket || '10-20m'}
+                    {formatTimeBucket(currentAction.time_bucket)}
                   </span>
                 </div>
 
