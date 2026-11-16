@@ -118,6 +118,12 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
     };
   });
 
+  // Action Flow Mode (assigned: 1 card, paired: 2 cards)
+  const [servingMode, setServingMode] = useState<'assigned' | 'paired'>(() => {
+    return (localStorage.getItem('focus_serving_mode') as 'assigned' | 'paired') || 'assigned';
+  });
+  const [pairedCandidates, setPairedCandidates] = useState<[CandidateScore, CandidateScore] | null>(null);
+
   // Current served action
   const [currentAction, setCurrentAction] = useState<FocusAction | null>(null);
   const [isMicroFirstStepOnly, setIsMicroFirstStepOnly] = useState(false);
@@ -258,16 +264,17 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
       now: new Date(),
     };
 
-    const { selected, ranked } = rankCandidates(actionsPool, ctx);
+    const { selected, ranked, paired } = rankCandidates(actionsPool, ctx);
     setRankedCandidates(ranked);
+    setPairedCandidates(paired);
 
-    if (selected) {
+    if (servingMode === 'paired' && paired) {
+      setCurrentAction(paired[0].action);
+      setCurrentScoreData(paired[0]);
+    } else if (selected) {
       setCurrentAction(selected.action);
       setCurrentScoreData(selected);
       if (selected.isReservedSlot) setReservedSlotUsed(true);
-      if (selected.totalScore >= 9000 && selected.isTripwire) {
-        // Tripwire was served
-      }
     } else {
       // Fallback action if pool is empty
       const fallback: FocusAction = {
@@ -288,7 +295,7 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
 
     queueEvent('offer_served', {
       task_id: selected?.action.task_id || 'default_action',
-      mode: 'assigned',
+      mode: servingMode,
       target_friction: selected?.targetFriction || 2,
       micro_only: notNowCount >= 2,
       is_tripwire: selected?.isTripwire || false,
@@ -548,129 +555,173 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
         </div>
       )}
 
-      {/* STAGE 3: SINGLE OFFER SCREEN (Assigned mode) */}
+      {/* STAGE 3: OFFER SCREEN (Assigned or Paired Mode) */}
       {stage === 'offer' && currentAction && !showConfig && (
-        <div className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto w-full px-4 animate-fadeIn">
-          <div className="w-full bg-slate-900/95 border border-purple-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-md">
-            {/* Top offer badge */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-bold">
-                  Friction {currentAction.friction}/5
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-medium">
-                  {currentAction.time_bucket || '10-20m'}
-                </span>
+        <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full px-4 animate-fadeIn">
+          {servingMode === 'paired' && pairedCandidates ? (
+            /* PAIRED MODE: Two Action Cards to choose from */
+            <div className="w-full space-y-3">
+              <div className="text-center text-xs font-bold text-purple-300 uppercase tracking-wider mb-2">
+                Choose Your Next Action
               </div>
 
-              <button
-                onClick={() => setShowWhyThisOne(!showWhyThisOne)}
-                className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1"
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-                <span>Why this?</span>
-              </button>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {pairedCandidates.map((cand, idx) => {
+                  const act = cand.action;
+                  return (
+                    <div
+                      key={act.task_id}
+                      onClick={() => {
+                        setCurrentAction(act);
+                        setCurrentScoreData(cand);
+                        handleStartAction();
+                      }}
+                      className="bg-slate-900/95 border border-purple-500/30 hover:border-purple-400 p-5 rounded-2xl shadow-xl flex flex-col justify-between cursor-pointer active:scale-98 transition group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="px-2 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[10px] font-bold">
+                            Friction {act.friction}/5
+                          </span>
+                          <span className="text-[10px] text-slate-400">{act.time_bucket || '10-20m'}</span>
+                        </div>
+                        <h3 className="text-base font-extrabold text-white leading-snug group-hover:text-purple-200 transition mb-3">
+                          {act.title}
+                        </h3>
+                      </div>
 
-            {/* Why This One explanation drawer */}
-            {showWhyThisOne && (
-              <div className="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 leading-relaxed animate-fadeIn">
-                <div className="font-bold text-purple-300 mb-1">Serving algorithm breakdown:</div>
-                {currentScoreData?.reasons && currentScoreData.reasons.length > 0 ? (
-                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
-                    {currentScoreData.reasons.map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-[11px] text-slate-400">Chosen to match your target friction of {currentScoreData?.targetFriction || 2}.</p>
-                )}
+                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
+                        <span className="text-[11px] text-purple-400 font-bold">Tap to Start</span>
+                        <Play className="w-4 h-4 text-purple-400 fill-current" />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
 
-            {/* Title / Action Description */}
-            <h2 className="text-xl sm:text-2xl font-black text-white leading-snug tracking-tight mb-4">
-              {currentAction.title}
-            </h2>
-
-            {/* Micro first move reminder */}
-            <div className="p-3.5 bg-purple-950/40 border border-purple-800/40 rounded-xl mb-6">
-              <span className="block text-[10px] font-extrabold uppercase tracking-wider text-purple-300 mb-0.5">
-                First physical move (under 60s):
-              </span>
-              <p className="text-sm font-semibold text-purple-100">
-                {currentAction.first_action || 'Open the first relevant file or app'}
-              </p>
+              {/* Not now / Skip pair button */}
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={handleNotNow}
+                  className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs font-semibold border border-slate-800 transition"
+                >
+                  Neither right now (Not now)
+                </button>
+              </div>
             </div>
-
-            {/* START BUTTON */}
-            <button
-              onClick={handleStartAction}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-black text-lg shadow-xl shadow-purple-900/40 transition flex items-center justify-center gap-2 mb-4 cursor-pointer"
-            >
-              <Play className="w-5 h-5 fill-current" />
-              <span>Start</span>
-            </button>
-
-            {/* Micro Controls: Smaller part, Bigger part, Not now */}
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              <button
-                onClick={handleSmallerPart}
-                className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1"
-                title="Shift target friction down"
-              >
-                <Minus className="w-3.5 h-3.5" /> Smaller
-              </button>
-              <button
-                onClick={handleBiggerPart}
-                className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1"
-                title="Shift target friction up"
-              >
-                <Plus className="w-3.5 h-3.5" /> Bigger
-              </button>
-              <button
-                onClick={handleNotNow}
-                className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition"
-              >
-                Not now
-              </button>
-            </div>
-
-            {/* Session Momentum & Guilt-Free Stop Option */}
-            {completedActions.length > 0 && (
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold">
-                  <Flame className="w-4 h-4 text-amber-400 fill-current" />
-                  <span>
-                    {completedActions.length} done this flow
-                    {completedActions.length >= 2 && ' (Goal Met! 🎉)'}
+          ) : (
+            /* ASSIGNED MODE: Single Focused Card */
+            <div className="w-full bg-slate-900/95 border border-purple-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-md">
+              {/* Top offer badge */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-bold">
+                    Friction {currentAction.friction}/5
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-medium">
+                    {currentAction.time_bucket || '10-20m'}
                   </span>
                 </div>
 
                 <button
-                  onClick={async () => {
-                    await queueEvent('flow_stopped_cleanly', {
-                      completed_in_session: completedActions.length,
-                      reason: 'voluntary_stop',
-                    });
-                    setStage('do_button');
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 ${
-                    completedActions.length >= 2
-                      ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60'
-                      : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
-                  }`}
-                  title={
-                    completedActions.length >= 2
-                      ? 'You completed 2+ tasks. Stop with full credit!'
-                      : 'Stop this flow session'
-                  }
+                  onClick={() => setShowWhyThisOne(!showWhyThisOne)}
+                  className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1"
                 >
-                  {completedActions.length >= 2 ? 'Done for now ✓' : 'Stop flow'}
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>Why this?</span>
                 </button>
               </div>
-            )}
-          </div>
+
+              {/* Why This One explanation drawer */}
+              {showWhyThisOne && (
+                <div className="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 leading-relaxed animate-fadeIn">
+                  <div className="font-bold text-purple-300 mb-1">Serving algorithm breakdown:</div>
+                  {currentScoreData?.reasons && currentScoreData.reasons.length > 0 ? (
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
+                      {currentScoreData.reasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">Chosen to match your target friction of {currentScoreData?.targetFriction || 2}.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Title / Action Description */}
+              <h2 className="text-xl sm:text-2xl font-black text-white leading-snug tracking-tight mb-6">
+                {currentAction.title}
+              </h2>
+
+              {/* START BUTTON */}
+              <button
+                onClick={handleStartAction}
+                className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white font-black text-lg shadow-xl shadow-purple-900/40 transition flex items-center justify-center gap-2 mb-4 cursor-pointer"
+              >
+                <Play className="w-5 h-5 fill-current" />
+                <span>Start</span>
+              </button>
+
+              {/* Micro Controls: Smaller part, Bigger part, Not now */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <button
+                  onClick={handleSmallerPart}
+                  className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1"
+                  title="Shift target friction down"
+                >
+                  <Minus className="w-3.5 h-3.5" /> Smaller
+                </button>
+                <button
+                  onClick={handleBiggerPart}
+                  className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1"
+                  title="Shift target friction up"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Bigger
+                </button>
+                <button
+                  onClick={handleNotNow}
+                  className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700 transition"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Session Momentum & Guilt-Free Stop Option */}
+          {completedActions.length > 0 && (
+            <div className="w-full mt-3 p-3 bg-slate-900/80 border border-slate-800 rounded-2xl flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs text-purple-300 font-semibold">
+                <Flame className="w-4 h-4 text-amber-400 fill-current" />
+                <span>
+                  {completedActions.length} done this flow
+                  {completedActions.length >= 2 && ' (Goal Met! 🎉)'}
+                </span>
+              </div>
+
+              <button
+                onClick={async () => {
+                  await queueEvent('flow_stopped_cleanly', {
+                    completed_in_session: completedActions.length,
+                    reason: 'voluntary_stop',
+                  });
+                  setStage('do_button');
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 ${
+                  completedActions.length >= 2
+                    ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60'
+                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+                title={
+                  completedActions.length >= 2
+                    ? 'You completed 2+ tasks. Stop with full credit!'
+                    : 'Stop this flow session'
+                }
+              >
+                {completedActions.length >= 2 ? 'Done for now ✓' : 'Stop flow'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -697,17 +748,9 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
             </div>
 
             {/* Current action title */}
-            <h2 className="text-xl sm:text-2xl font-black text-white leading-snug tracking-tight mb-4">
+            <h2 className="text-xl sm:text-2xl font-black text-white leading-snug tracking-tight mb-8">
               {currentAction.title}
             </h2>
-
-            {/* Reminder of first step */}
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 mb-6">
-              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Focus reminder:</span>
-              <p className="font-semibold text-purple-200">
-                {currentAction.first_action || 'Keep moving forward'}
-              </p>
-            </div>
 
             {/* DONE BUTTON */}
             <button
@@ -791,6 +834,43 @@ export function DoMainScreen({ onOpenTaskView }: Props) {
                 >
                   Save & Back to DO
                 </button>
+              </div>
+
+              {/* Action Flow Mode Switch (Assigned vs Paired) */}
+              <div className="pt-2 pb-3 border-b border-slate-800">
+                <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
+                  Action Serving Mode:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServingMode('assigned');
+                      localStorage.setItem('focus_serving_mode', 'assigned');
+                    }}
+                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition ${
+                      servingMode === 'assigned'
+                        ? 'bg-purple-600 border-purple-400 text-white shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    1 Card (Assigned)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServingMode('paired');
+                      localStorage.setItem('focus_serving_mode', 'paired');
+                    }}
+                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition ${
+                      servingMode === 'paired'
+                        ? 'bg-purple-600 border-purple-400 text-white shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    2 Cards (Paired Choice)
+                  </button>
+                </div>
               </div>
 
               {/* Full Momentum Settings Link */}

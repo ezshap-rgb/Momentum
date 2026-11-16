@@ -157,7 +157,7 @@ export function rankCandidates(
   actions: FocusAction[],
   ctx: SessionContext,
   settings: ServingSettings = DEFAULT_SERVING_SETTINGS
-): { selected: CandidateScore | null; ranked: CandidateScore[] } {
+): { selected: CandidateScore | null; ranked: CandidateScore[]; paired: [CandidateScore, CandidateScore] | null } {
   const now = ctx.now || new Date();
   const isCountDay = isCountingDay(now, settings.countingDays);
   const { target: targetFriction } = computeTargetFriction(ctx, settings);
@@ -172,11 +172,10 @@ export function rankCandidates(
   });
 
   if (available.length === 0) {
-    return { selected: null, ranked: [] };
+    return { selected: null, ranked: [], paired: null };
   }
 
   // OVERRIDE 1: TRIPWIRE
-  // An external deadline due within 1 counting day jumps to the front
   for (const a of available) {
     if (a.deadline_kind === 'external' && a.due_date) {
       const dueDate = new Date(a.due_date);
@@ -196,13 +195,12 @@ export function rankCandidates(
           isReservedSlot: false,
           reasons: ['Tripwire: External deadline due soon'],
         };
-        return { selected: tripwireScore, ranked: [tripwireScore] };
+        return { selected: tripwireScore, ranked: [tripwireScore], paired: null };
       }
     }
   }
 
   // OVERRIDE 2: RESERVED SLOT
-  // Once per counting day, after the 2nd completed action, serve the highest-importance action
   if (isCountDay && ctx.completedActions.length >= 2 && !ctx.reservedSlotUsedToday) {
     const highImp = available
       .filter((a) => (a.importance || 'med') === 'high')
@@ -224,7 +222,7 @@ export function rankCandidates(
         isReservedSlot: true,
         reasons: ['Reserved slot: High importance priority'],
       };
-      return { selected: reservedScore, ranked: [reservedScore] };
+      return { selected: reservedScore, ranked: [reservedScore], paired: null };
     }
   }
 
@@ -242,7 +240,6 @@ export function rankCandidates(
       const dueDate = new Date(a.due_date);
       const daysAway = getCountingDaysDifference(now, dueDate, settings.countingDays);
       if (daysAway <= 7) {
-        // Steep curve near due date
         const baseUrgency = Math.max(0, 10 - daysAway * 1.3);
         urgencyScore = a.deadline_kind === 'self' ? baseUrgency * 0.5 : baseUrgency;
         if (urgencyScore > 3) {
@@ -269,14 +266,14 @@ export function rankCandidates(
       if (ageScore >= 2) reasons.push('Waiting for a while');
     }
 
-    // Project Heartbeat (+3 if project action has had no progress in 3 days)
+    // Project Heartbeat
     let heartbeatScore = 0;
     if (a.category === 'project') {
       heartbeatScore = settings.heartbeatBonus;
       reasons.push('Project needs momentum');
     }
 
-    // Variety Score (-3 if same type as last completed)
+    // Variety Score
     let varietyScore = 0;
     if (ctx.lastCompletedType && a.type && ctx.lastCompletedType === a.type) {
       varietyScore = settings.varietyPenalty;
@@ -310,8 +307,26 @@ export function rankCandidates(
 
   candidates.sort((a, b) => b.totalScore - a.totalScore);
 
+  // Paired Mode: Pick 2 contrasting candidates (e.g. 1 smaller friction / lighter, 1 bigger / more rewarding)
+  let paired: [CandidateScore, CandidateScore] | null = null;
+  if (candidates.length >= 2) {
+    const first = candidates[0];
+    // Find candidate with different friction or lower effort
+    let second = candidates.find((c) => c.action.task_id !== first.action.task_id && c.effectiveFriction !== first.effectiveFriction);
+    if (!second) {
+      second = candidates[1];
+    }
+    // Sort pair so smaller/lighter is card A, bigger/rewarding is card B
+    if (first.effectiveFriction <= second.effectiveFriction) {
+      paired = [first, second];
+    } else {
+      paired = [second, first];
+    }
+  }
+
   return {
     selected: candidates[0] || null,
     ranked: candidates,
+    paired,
   };
 }

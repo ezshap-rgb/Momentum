@@ -12,6 +12,7 @@ export function SyncIndicator() {
     waitingCount: 0,
   });
   const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     const unsubscribe = subscribeSyncState((newStatus) => {
@@ -19,6 +20,12 @@ export function SyncIndicator() {
     });
     return unsubscribe;
   }, []);
+
+  const handleSyncClick = async () => {
+    setIsSyncing(true);
+    await triggerBackgroundSync();
+    setIsSyncing(false);
+  };
 
   if (sync.state === 'synced') {
     return (
@@ -36,11 +43,11 @@ export function SyncIndicator() {
   if (sync.state === 'waiting') {
     return (
       <button
-        onClick={() => triggerBackgroundSync()}
+        onClick={handleSyncClick}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-950/60 border border-amber-800/60 text-amber-300 text-[11px] font-medium active:scale-95 transition"
-        title="Saved locally on phone. Tap to sync now"
+        title="Saved locally on phone. Tap to sync now to Google Sheet"
       >
-        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+        <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isSyncing ? 'animate-spin' : ''}`} />
         <span>Waiting ({sync.waitingCount})</span>
       </button>
     );
@@ -51,7 +58,7 @@ export function SyncIndicator() {
       <button
         onClick={() => {
           setShowErrorDetail(!showErrorDetail);
-          triggerBackgroundSync();
+          handleSyncClick();
         }}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-950/80 border border-rose-700 text-rose-200 text-[11px] font-medium active:scale-95 transition shadow-sm"
         title={sync.error || 'Sync failed. Tap to retry or see details.'}
@@ -75,7 +82,7 @@ export function SyncIndicator() {
             {sync.error}
           </div>
           <button
-            onClick={() => triggerBackgroundSync()}
+            onClick={handleSyncClick}
             className="w-full py-1 bg-rose-600 hover:bg-rose-500 rounded text-white font-bold text-[10px] transition"
           >
             Retry Now
