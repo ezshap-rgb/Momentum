@@ -55,6 +55,8 @@ export interface IgnitionExercise {
   unit: string;
   tip?: string;
   habitId?: string;
+  schedule?: string | null;
+  circuit?: 'morning' | 'evening' | 'both';
 }
 
 /**
@@ -68,6 +70,8 @@ export function pickNextExercise(lastExercise?: string): IgnitionExercise {
     reps: pick.reps,
     unit: pick.unit,
     habitId: pick.habitId,
+    schedule: pick.schedule,
+    circuit: pick.circuit,
   };
 }
 

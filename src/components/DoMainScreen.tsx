@@ -146,6 +146,9 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       name: pick.name,
       reps: pick.reps,
       unit: (pick.unit as any) || 'reps',
+      habitId: pick.habitId,
+      schedule: pick.schedule,
+      circuit: pick.circuit,
     };
   });
 
@@ -339,6 +342,9 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       name: pick.name,
       reps: pick.reps,
       unit: (pick.unit as any) || 'reps',
+      habitId: pick.habitId,
+      schedule: pick.schedule,
+      circuit: pick.circuit,
     };
     setCurrentExercise(nextEx);
     setStage('ignition');
@@ -934,7 +940,11 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
             </div>
 
             {(() => {
-              const display = formatExerciseDisplay(currentExercise.name);
+              const display = formatExerciseDisplay(
+                currentExercise.name,
+                currentExercise.schedule,
+                currentExercise.circuit
+              );
               return (
                 <div className="mb-2">
                   <div className="text-4xl sm:text-5xl font-black text-white tracking-tight">

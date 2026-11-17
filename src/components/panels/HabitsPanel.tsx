@@ -222,35 +222,63 @@ export const HabitsPanel: React.FC = () => {
                 className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-pink-500"
                 autoFocus
               />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  value={newNextDue}
-                  onChange={(e) => setNewNextDue(e.target.value)}
-                  placeholder="Upcoming timing (e.g. 5:30 PM)..."
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-pink-500"
-                />
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
-                    <input
-                      type="radio"
-                      name="hType"
-                      checked={newType === 'boolean'}
-                      onChange={() => setNewType('boolean')}
-                      className="accent-pink-500"
-                    />
-                    <span>Yes/No</span>
-                  </label>
-                  <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
-                    <input
-                      type="radio"
-                      name="hType"
-                      checked={newType === 'duration_min'}
-                      onChange={() => setNewType('duration_min')}
-                      className="accent-pink-500"
-                    />
-                    <span>Minutes</span>
-                  </label>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-semibold text-slate-400">Timing Presets:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewNextDue('Daily Morning')}
+                      className="px-1.5 py-0.5 text-[9px] rounded bg-pink-500/10 hover:bg-pink-500/20 text-pink-600 dark:text-pink-400 font-medium transition cursor-pointer"
+                    >
+                      Morning
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewNextDue('Daily Night')}
+                      className="px-1.5 py-0.5 text-[9px] rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 font-medium transition cursor-pointer"
+                    >
+                      Night
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewNextDue('Daily')}
+                      className="px-1.5 py-0.5 text-[9px] rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium transition cursor-pointer"
+                    >
+                      Daily
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newNextDue}
+                    onChange={(e) => setNewNextDue(e.target.value)}
+                    placeholder="e.g. Daily Morning, Daily Night..."
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-pink-500 text-xs"
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="hType"
+                        checked={newType === 'boolean'}
+                        onChange={() => setNewType('boolean')}
+                        className="accent-pink-500"
+                      />
+                      <span>Yes/No</span>
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="hType"
+                        checked={newType === 'duration_min'}
+                        onChange={() => setNewType('duration_min')}
+                        className="accent-pink-500"
+                      />
+                      <span>Minutes</span>
+                    </label>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end gap-1.5 pt-1">
@@ -457,13 +485,38 @@ export const HabitsPanel: React.FC = () => {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Scheduled Timing / Cadence</label>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Scheduled Timing / Cadence</label>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditNextDue('Daily Morning')}
+                                className="px-1.5 py-0.5 text-[9px] rounded bg-pink-500/10 hover:bg-pink-500/20 text-pink-600 dark:text-pink-400 font-medium transition cursor-pointer"
+                              >
+                                Morning
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditNextDue('Daily Night')}
+                                className="px-1.5 py-0.5 text-[9px] rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 font-medium transition cursor-pointer"
+                              >
+                                Night
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditNextDue('Daily')}
+                                className="px-1.5 py-0.5 text-[9px] rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium transition cursor-pointer"
+                              >
+                                Daily
+                              </button>
+                            </div>
+                          </div>
                           <input
                             type="text"
                             value={editNextDue}
                             onChange={(e) => setEditNextDue(e.target.value)}
-                            placeholder="e.g. Daily Morning, 5:30 PM..."
-                            className="w-full bg-white dark:bg-slate-900 border border-pink-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                            placeholder="e.g. Daily Morning, Daily Night..."
+                            className="w-full bg-white dark:bg-slate-900 border border-pink-400 rounded-lg px-2 py-1 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-pink-500 text-xs"
                           />
                         </div>
                         <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-200 dark:border-slate-800">

@@ -15,6 +15,7 @@ export interface HabitItem {
   unit: 'reps' | 'seconds' | 'cycle';
   currentReps: number;
   isComplete: boolean;
+  schedule?: string | null;
 }
 
 export type CircuitLadder = 'full' | 'half' | 'minimum';
@@ -35,15 +36,15 @@ export interface GearState {
 
 export const INITIAL_HABITS: HabitItem[] = [
   // Half A
-  { habit_id: 'pushups_mrng', name: 'Push-ups 50 (mrng)', half: 'A', circuit: 'morning', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'pushups_nt', name: 'Push-ups 50 (nt)', half: 'A', circuit: 'evening', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'squats', name: 'Squats 30', half: 'A', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'plank', name: 'Plank 60s', half: 'A', circuit: 'both', quota: 60, unit: 'seconds', currentReps: 0, isComplete: false },
-  { habit_id: 'hip_mobility', name: 'Hip Mobility 1', half: 'A', circuit: 'both', quota: 1, unit: 'cycle', currentReps: 0, isComplete: false },
+  { habit_id: 'pushups_mrng', name: 'Push-ups 50 (mrng)', schedule: 'Daily Morning', half: 'A', circuit: 'morning', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'pushups_nt', name: 'Push-ups 50 (nt)', schedule: 'Daily Night', half: 'A', circuit: 'evening', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'squats', name: 'Squats 30', schedule: 'Daily', half: 'A', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'plank', name: 'Plank 60s', schedule: 'Daily', half: 'A', circuit: 'both', quota: 60, unit: 'seconds', currentReps: 0, isComplete: false },
+  { habit_id: 'hip_mobility', name: 'Hip Mobility 1', schedule: 'Daily', half: 'A', circuit: 'both', quota: 1, unit: 'cycle', currentReps: 0, isComplete: false },
   // Half B
-  { habit_id: 'pullups', name: 'Pull-ups 10', half: 'B', circuit: 'both', quota: 10, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'crunches', name: 'Crunches 30', half: 'B', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'reverse_plank', name: 'Reverse Plank 45s', half: 'B', circuit: 'both', quota: 45, unit: 'seconds', currentReps: 0, isComplete: false },
+  { habit_id: 'pullups', name: 'Pull-ups 10', schedule: 'Daily', half: 'B', circuit: 'both', quota: 10, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'crunches', name: 'Crunches 30', schedule: 'Daily', half: 'B', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'reverse_plank', name: 'Reverse Plank 45s', schedule: 'Daily', half: 'B', circuit: 'both', quota: 45, unit: 'seconds', currentReps: 0, isComplete: false },
 ];
 
 const STORAGE_KEYS = {
@@ -125,14 +126,29 @@ export function dismissHabit(habitId: string): { updated: HabitItem[]; isAllClea
  * Parses a habit from Google Tasks or Board into a HabitItem with extracted quota & unit
  */
 export function parseHabitToHabitItem(
-  habit: { id: string; name: string; target?: number; log?: Record<string, any> },
+  habit: { id: string; name: string; target?: number; next_due?: string | null; log?: Record<string, any> },
   isCompleteToday: boolean
 ): HabitItem {
   const lower = habit.name.toLowerCase();
+  const schedLower = (habit.next_due || '').toLowerCase();
 
-  const isMorning = lower.includes('mrng') || lower.includes('morning');
-  const isNight = lower.includes('nt') || lower.includes('night') || lower.includes('evening');
-  const circuit = isMorning ? 'morning' : isNight ? 'evening' : 'both';
+  const isMorning =
+    lower.includes('mrng') ||
+    lower.includes('morning') ||
+    schedLower.includes('morning') ||
+    schedLower.includes('mrng') ||
+    schedLower.includes('am');
+
+  const isNight =
+    lower.includes('nt') ||
+    lower.includes('night') ||
+    lower.includes('evening') ||
+    schedLower.includes('night') ||
+    schedLower.includes('nt') ||
+    schedLower.includes('evening') ||
+    schedLower.includes('pm');
+
+  const circuit: 'morning' | 'evening' | 'both' = isMorning ? 'morning' : isNight ? 'evening' : 'both';
 
   const numMatch = habit.name.match(/\b(\d+)\b/);
   let quota = numMatch ? parseInt(numMatch[1], 10) : habit.target && habit.target > 1 ? habit.target : 30;
@@ -159,6 +175,7 @@ export function parseHabitToHabitItem(
     name: habit.name,
     half: 'A',
     circuit,
+    schedule: habit.next_due || null,
     quota,
     unit,
     currentReps: isCompleteToday ? quota : 0,
@@ -170,7 +187,7 @@ export function parseHabitToHabitItem(
  * Synchronizes habits with live Google Tasks / Board habits
  */
 export function syncHabitsWithBoardData(
-  boardHabits?: Array<{ id: string; name: string; target?: number; log?: Record<string, any> }>
+  boardHabits?: Array<{ id: string; name: string; target?: number; next_due?: string | null; log?: Record<string, any> }>
 ): HabitItem[] {
   const today = getTodayDateString();
   let currentHabits = loadHabitsState();
@@ -189,13 +206,21 @@ export function syncHabitsWithBoardData(
           h.name.toLowerCase().includes(bhLower)
       );
 
+      const parsed = parseHabitToHabitItem(bh, isDoneToday);
       if (existingIdx >= 0) {
-        if (isDoneToday && !updated[existingIdx].isComplete) {
-          updated[existingIdx].isComplete = true;
-          updated[existingIdx].currentReps = updated[existingIdx].quota;
-        }
+        // ALWAYS update name, schedule, circuit, and quota from the habit editor!
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          name: parsed.name,
+          quota: parsed.quota,
+          unit: parsed.unit,
+          circuit: parsed.circuit,
+          schedule: parsed.schedule,
+          isComplete: isDoneToday ? true : updated[existingIdx].isComplete,
+          currentReps: isDoneToday ? parsed.quota : updated[existingIdx].currentReps,
+        };
       } else {
-        updated.push(parseHabitToHabitItem(bh, isDoneToday));
+        updated.push(parsed);
       }
     }
     saveHabitsState(updated);
@@ -208,8 +233,13 @@ export function syncHabitsWithBoardData(
 /**
  * Formats an exercise name for display on the Physical Ignition screen:
  * Extracts clean title and optional subtitle (e.g. "Morning", "Night")
+ * Pulls timing from schedule (cadence) if not in the title!
  */
-export function formatExerciseDisplay(name: string): { title: string; subtitle?: string } {
+export function formatExerciseDisplay(
+  name: string,
+  schedule?: string | null,
+  circuit?: string
+): { title: string; subtitle?: string } {
   let title = name
     .replace(/\b\d+(\s*(s|sec|seconds|reps|m|min))?\b/gi, '')
     .replace(/\s*\((mrng|nt|morning|night|evening)\)\s*/gi, '')
@@ -220,9 +250,29 @@ export function formatExerciseDisplay(name: string): { title: string; subtitle?:
   // Capitalize properly
   title = title.charAt(0).toUpperCase() + title.slice(1);
 
+  const lower = name.toLowerCase();
+  const schedLower = (schedule || '').toLowerCase();
+
   let subtitle: string | undefined = undefined;
-  if (/mrng|morning/i.test(name)) subtitle = 'Morning';
-  else if (/nt|night|evening/i.test(name)) subtitle = 'Night';
+  if (
+    lower.includes('mrng') ||
+    lower.includes('morning') ||
+    schedLower.includes('morning') ||
+    schedLower.includes('mrng') ||
+    circuit === 'morning'
+  ) {
+    subtitle = 'Morning';
+  } else if (
+    lower.includes('nt') ||
+    lower.includes('night') ||
+    lower.includes('evening') ||
+    schedLower.includes('night') ||
+    schedLower.includes('nt') ||
+    schedLower.includes('evening') ||
+    circuit === 'evening'
+  ) {
+    subtitle = 'Night';
+  }
 
   return { title, subtitle };
 }
@@ -230,20 +280,36 @@ export function formatExerciseDisplay(name: string): { title: string; subtitle?:
 /**
  * Concise compact 2-line formatter for background scattered habits:
  * Line 1: action + amount (e.g. "push up 50")
- * Line 2: window / timing (e.g. "mrng", "nt", "daily")
+ * Line 2: window / timing (e.g. "morning", "night")
+ * Pulls morning/night from schedule (next_due) if not in title!
  */
 export function formatHabitCompact(habit: HabitItem): { line1: string; line2?: string } {
   let name = habit.name.trim();
   const lower = name.toLowerCase();
+  const schedLower = (habit.schedule || '').toLowerCase();
 
-  const isMorning = lower.includes('mrng') || lower.includes('morning') || habit.circuit === 'morning';
-  const isNight = lower.includes('nt') || lower.includes('night') || lower.includes('evening') || habit.circuit === 'evening';
+  const isMorning =
+    lower.includes('mrng') ||
+    lower.includes('morning') ||
+    schedLower.includes('morning') ||
+    schedLower.includes('mrng') ||
+    habit.circuit === 'morning';
+
+  const isNight =
+    lower.includes('nt') ||
+    lower.includes('night') ||
+    lower.includes('evening') ||
+    schedLower.includes('night') ||
+    schedLower.includes('nt') ||
+    schedLower.includes('evening') ||
+    habit.circuit === 'evening';
 
   let cleanName = name
     .replace(/(push-ups|pushups)/gi, 'push up')
     .replace(/(pull-ups|pullups)/gi, 'pull up')
     .replace(/\s*\((mrng|nt|morning|night|evening)\)\s*/gi, '')
     .replace(/\s*(mrng|nt|morning|night|evening)\s*$/gi, '')
+    .replace(/^(morning|night|evening)\s+/gi, '')
     .trim();
 
   // If number isn't in name, append quota
@@ -312,7 +378,14 @@ export function creditHabitFromIgnition(exerciseName: string, reps: number): { u
 /**
  * Ignition triggers sourced directly from uncleared habits with FULL quotas!
  */
-export function getWeightedIgnitionPick(lastExercise?: string): { name: string; reps: number; unit: string; habitId?: string } {
+export function getWeightedIgnitionPick(lastExercise?: string): {
+  name: string;
+  reps: number;
+  unit: string;
+  habitId?: string;
+  schedule?: string | null;
+  circuit?: 'morning' | 'evening' | 'both';
+} {
   const habits = loadHabitsState();
   // Filter for uncleared habits
   const uncleared = habits.filter((h) => !h.isComplete);
@@ -326,6 +399,8 @@ export function getWeightedIgnitionPick(lastExercise?: string): { name: string; 
       reps: chosen.quota,
       unit: chosen.unit,
       habitId: chosen.habit_id,
+      schedule: chosen.schedule,
+      circuit: chosen.circuit,
     };
   }
 
@@ -337,5 +412,7 @@ export function getWeightedIgnitionPick(lastExercise?: string): { name: string; 
     reps: chosen.quota,
     unit: chosen.unit,
     habitId: chosen.habit_id,
+    schedule: chosen.schedule,
+    circuit: chosen.circuit,
   };
 }
