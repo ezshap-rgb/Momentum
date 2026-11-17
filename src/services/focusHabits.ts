@@ -107,12 +107,12 @@ export function dismissHabit(habitId: string): { updated: HabitItem[]; isAllClea
  * Line 1: action + amount (e.g. "push up 50")
  * Line 2: window / timing (e.g. "mrng", "nt", "daily")
  */
-export function formatHabitCompact(habit: HabitItem): { line1: string; line2: string } {
+export function formatHabitCompact(habit: HabitItem): { line1: string; line2?: string } {
   let name = habit.name.trim();
   const lower = name.toLowerCase();
 
-  const isMrng = lower.includes('mrng') || lower.includes('morning') || habit.circuit === 'morning';
-  const isNt = lower.includes('nt') || lower.includes('night') || lower.includes('evening') || habit.circuit === 'evening';
+  const isMorning = lower.includes('mrng') || lower.includes('morning') || habit.circuit === 'morning';
+  const isNight = lower.includes('nt') || lower.includes('night') || lower.includes('evening') || habit.circuit === 'evening';
 
   let cleanName = name
     .replace(/(push-ups|pushups)/gi, 'push up')
@@ -128,7 +128,8 @@ export function formatHabitCompact(habit: HabitItem): { line1: string; line2: st
   }
 
   const line1 = cleanName.toLowerCase();
-  const line2 = isMrng ? 'mrng' : isNt ? 'nt' : habit.unit === 'seconds' ? 'timed' : 'daily';
+  // Only show line 2 if it's morning or night. Once-daily habits don't need a second line!
+  const line2 = isMorning ? 'morning' : isNight ? 'night' : undefined;
 
   return { line1, line2 };
 }

@@ -8,16 +8,17 @@ interface Props {
   isAllClear?: boolean;
 }
 
-// Organic scattered anchor coordinates surrounding the center DO area (which occupies 35%-65%)
+// Organic scattered anchor coordinates placed strictly in the upper and lower perimeter bands
+// Central 30%-70% vertical zone is kept completely clear so the DO button is NEVER covered on any screen size
 const SCATTER_SLOTS = [
-  { top: '15%', left: '7%' },
-  { top: '14%', right: '8%' },
-  { top: '44%', left: '4%' },
-  { top: '48%', right: '5%' },
-  { bottom: '16%', left: '9%' },
-  { bottom: '18%', right: '10%' },
-  { top: '8%', left: '46%' },
-  { bottom: '11%', left: '48%' },
+  { top: '12%', left: '5%' },
+  { top: '12%', right: '5%' },
+  { top: '22%', left: '6%' },
+  { top: '22%', right: '6%' },
+  { bottom: '22%', left: '6%' },
+  { bottom: '22%', right: '6%' },
+  { bottom: '13%', left: '5%' },
+  { bottom: '13%', right: '5%' },
 ];
 
 export function ScatteredHabitsBackground({ habits, onDismiss, isAllClear }: Props) {
@@ -61,15 +62,17 @@ export function ScatteredHabitsBackground({ habits, onDismiss, isAllClear }: Pro
           >
             <button
               onClick={() => handleHabitClick(habit)}
-              className="text-left px-3 py-1.5 rounded-xl bg-amber-950/20 hover:bg-amber-900/40 border border-amber-500/25 hover:border-amber-400/60 backdrop-blur-xs transition-all duration-200 cursor-pointer shadow-xs hover:shadow-amber-500/10 active:scale-95 group select-none"
+              className="text-left px-2.5 py-1 rounded-xl bg-amber-950/20 hover:bg-amber-900/40 border border-amber-500/25 hover:border-amber-400/60 backdrop-blur-xs transition-all duration-200 cursor-pointer shadow-xs hover:shadow-amber-500/10 active:scale-95 group select-none"
               title="Click to mark done and clear from screen"
             >
               <div className="text-[11px] font-normal text-amber-300/85 group-hover:text-amber-200 tracking-tight leading-tight whitespace-nowrap">
                 {line1}
               </div>
-              <div className="text-[9px] font-light text-amber-400/50 group-hover:text-amber-300/80 tracking-wider uppercase leading-none mt-0.5 whitespace-nowrap">
-                {line2}
-              </div>
+              {line2 && (
+                <div className="text-[9px] font-light text-amber-400/60 group-hover:text-amber-300/80 tracking-wider lowercase leading-none mt-0.5 whitespace-nowrap">
+                  {line2}
+                </div>
+              )}
             </button>
           </div>
         );
