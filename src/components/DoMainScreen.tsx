@@ -875,11 +875,11 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       {stage === 'do_button' && !showConfig && (
         <div className="flex-1 flex flex-col items-center justify-center my-auto">
           <div className="relative flex items-center justify-center">
-            <div className="absolute w-72 h-72 sm:w-80 sm:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
+            <div className="absolute w-64 h-64 sm:w-80 sm:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
 
             <button
               onClick={handleDoPress}
-              className="relative w-60 h-60 sm:w-68 sm:h-68 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-6xl sm:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
+              className="relative w-56 h-56 sm:w-68 sm:h-68 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-6xl sm:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
             >
               <span>DO</span>
               <span className="text-xs uppercase font-extrabold tracking-widest text-purple-200/90">

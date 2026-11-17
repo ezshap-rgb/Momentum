@@ -8,17 +8,35 @@ interface Props {
   isAllClear?: boolean;
 }
 
-// Organic scattered anchor coordinates placed strictly in the upper and lower perimeter bands
-// Central 30%-70% vertical zone is kept completely clear so the DO button is NEVER covered on any screen size
-const SCATTER_SLOTS = [
-  { top: '12%', left: '5%' },
-  { top: '12%', right: '5%' },
-  { top: '22%', left: '6%' },
-  { top: '22%', right: '6%' },
-  { bottom: '22%', left: '6%' },
-  { bottom: '22%', right: '6%' },
-  { bottom: '13%', left: '5%' },
-  { bottom: '13%', right: '5%' },
+// Organic scattered anchor coordinates around the perimeter and flanks
+// The central button area (roughly 35%-65% X and Y) is completely avoided,
+// scattering habits naturally across top, flanks (sides), and bottom.
+interface ScatterSlot {
+  style: React.CSSProperties;
+  rotateClass: string;
+}
+
+const SCATTER_SLOTS: ScatterSlot[] = [
+  // 1. Top left
+  { style: { top: '11%', left: '5%' }, rotateClass: '-rotate-1' },
+  // 2. Top right
+  { style: { top: '12%', right: '6%' }, rotateClass: 'rotate-1' },
+  // 3. Left flank (upper side)
+  { style: { top: '31%', left: '3%' }, rotateClass: 'rotate-1' },
+  // 4. Right flank (upper side)
+  { style: { top: '29%', right: '4%' }, rotateClass: '-rotate-1' },
+  // 5. Left flank (lower side)
+  { style: { top: '55%', left: '3%' }, rotateClass: '-rotate-2' },
+  // 6. Right flank (lower side)
+  { style: { top: '57%', right: '4%' }, rotateClass: 'rotate-2' },
+  // 7. Top center-left offset
+  { style: { top: '7%', left: '34%' }, rotateClass: 'rotate-1' },
+  // 8. Bottom center-right offset
+  { style: { bottom: '8%', right: '32%' }, rotateClass: '-rotate-1' },
+  // 9. Bottom left
+  { style: { bottom: '15%', left: '6%' }, rotateClass: 'rotate-2' },
+  // 10. Bottom right
+  { style: { bottom: '14%', right: '5%' }, rotateClass: '-rotate-2' },
 ];
 
 export function ScatteredHabitsBackground({ habits, onDismiss, isAllClear }: Props) {
@@ -53,8 +71,8 @@ export function ScatteredHabitsBackground({ habits, onDismiss, isAllClear }: Pro
         return (
           <div
             key={habit.habit_id}
-            style={slot as React.CSSProperties}
-            className={`absolute pointer-events-auto transition-all duration-300 transform ${
+            style={slot.style}
+            className={`absolute pointer-events-auto transition-all duration-300 transform ${slot.rotateClass} ${
               isDismissing
                 ? 'scale-50 opacity-0 -translate-y-3 pointer-events-none'
                 : 'scale-100 opacity-90 hover:opacity-100 hover:scale-105'
@@ -62,10 +80,10 @@ export function ScatteredHabitsBackground({ habits, onDismiss, isAllClear }: Pro
           >
             <button
               onClick={() => handleHabitClick(habit)}
-              className="text-left px-2.5 py-1 rounded-xl bg-amber-950/20 hover:bg-amber-900/40 border border-amber-500/25 hover:border-amber-400/60 backdrop-blur-xs transition-all duration-200 cursor-pointer shadow-xs hover:shadow-amber-500/10 active:scale-95 group select-none"
+              className="text-left px-2.5 py-1 rounded-xl bg-amber-950/20 hover:bg-amber-900/40 border border-amber-500/25 hover:border-amber-400/60 backdrop-blur-xs transition-all duration-200 cursor-pointer shadow-xs hover:shadow-amber-500/10 active:scale-95 group select-none max-w-[125px] sm:max-w-none"
               title="Click to mark done and clear from screen"
             >
-              <div className="text-[11px] font-normal text-amber-300/85 group-hover:text-amber-200 tracking-tight leading-tight whitespace-nowrap">
+              <div className="text-[11px] font-normal text-amber-300/85 group-hover:text-amber-200 tracking-tight leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
                 {line1}
               </div>
               {line2 && (
