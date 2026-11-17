@@ -47,7 +47,7 @@ export const INITIAL_HABITS: HabitItem[] = [
 ];
 
 const STORAGE_KEYS = {
-  HABITS: 'focus_habits_state',
+  HABITS: 'focus_habits_state_v3',
   LAST_HABITS_DATE: 'focus_last_habits_date',
   POWER_RESERVE: 'focus_power_reserve',
   LAST_RESERVE_DATE: 'focus_last_reserve_date',
@@ -61,14 +61,33 @@ export function loadHabitsState(): HabitItem[] {
   const today = getTodayDateString();
   const lastDate = localStorage.getItem(STORAGE_KEYS.LAST_HABITS_DATE);
 
+  // Clean legacy cached keys with old quotas
+  try {
+    localStorage.removeItem('focus_habits_state');
+    localStorage.removeItem('focus_habits_state_v2');
+  } catch (_) {}
+
   let habits: HabitItem[] = [];
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.HABITS);
     if (raw) habits = JSON.parse(raw);
   } catch (_) {}
 
-  if (!habits || habits.length === 0) {
-    habits = INITIAL_HABITS.map((h) => ({ ...h }));
+  // Check if cache contains outdated quotas (e.g. 15 pushups, 20 squats)
+  const hasStaleQuotas = habits.some(
+    (h) =>
+      (h.name.toLowerCase().includes('push') && h.quota < 50) ||
+      (h.name.toLowerCase().includes('squat') && h.quota < 30) ||
+      (h.name.toLowerCase().includes('plank') && !h.name.toLowerCase().includes('reverse') && h.quota < 60)
+  );
+
+  if (!habits || habits.length === 0 || hasStaleQuotas) {
+    const completedSet = new Set(habits.filter((h) => h.isComplete).map((h) => h.habit_id));
+    habits = INITIAL_HABITS.map((h) => ({
+      ...h,
+      isComplete: completedSet.has(h.habit_id),
+      currentReps: completedSet.has(h.habit_id) ? h.quota : 0,
+    }));
     saveHabitsState(habits);
     localStorage.setItem(STORAGE_KEYS.LAST_HABITS_DATE, today);
     return habits;
@@ -100,6 +119,112 @@ export function dismissHabit(habitId: string): { updated: HabitItem[]; isAllClea
   saveHabitsState(updated);
   const isAllClear = updated.every((h) => h.isComplete);
   return { updated, isAllClear };
+}
+
+/**
+ * Parses a habit from Google Tasks or Board into a HabitItem with extracted quota & unit
+ */
+export function parseHabitToHabitItem(
+  habit: { id: string; name: string; target?: number; log?: Record<string, any> },
+  isCompleteToday: boolean
+): HabitItem {
+  const lower = habit.name.toLowerCase();
+
+  const isMorning = lower.includes('mrng') || lower.includes('morning');
+  const isNight = lower.includes('nt') || lower.includes('night') || lower.includes('evening');
+  const circuit = isMorning ? 'morning' : isNight ? 'evening' : 'both';
+
+  const numMatch = habit.name.match(/\b(\d+)\b/);
+  let quota = numMatch ? parseInt(numMatch[1], 10) : habit.target && habit.target > 1 ? habit.target : 30;
+
+  if (quota <= 1) {
+    if (lower.includes('push')) quota = 50;
+    else if (lower.includes('squat')) quota = 30;
+    else if (lower.includes('crun')) quota = 30;
+    else if (lower.includes('pull')) quota = 10;
+    else if (lower.includes('plank')) quota = lower.includes('reverse') ? 45 : 60;
+    else if (lower.includes('mobility')) quota = 1;
+    else quota = 20;
+  }
+
+  let unit: 'reps' | 'seconds' | 'cycle' = 'reps';
+  if (/second|sec|\bs\b/i.test(habit.name)) {
+    unit = 'seconds';
+  } else if (/cycle/i.test(habit.name)) {
+    unit = 'cycle';
+  }
+
+  return {
+    habit_id: habit.id,
+    name: habit.name,
+    half: 'A',
+    circuit,
+    quota,
+    unit,
+    currentReps: isCompleteToday ? quota : 0,
+    isComplete: isCompleteToday,
+  };
+}
+
+/**
+ * Synchronizes habits with live Google Tasks / Board habits
+ */
+export function syncHabitsWithBoardData(
+  boardHabits?: Array<{ id: string; name: string; target?: number; log?: Record<string, any> }>
+): HabitItem[] {
+  const today = getTodayDateString();
+  let currentHabits = loadHabitsState();
+
+  if (boardHabits && boardHabits.length > 0) {
+    const updated = [...currentHabits];
+    for (const bh of boardHabits) {
+      const bhLower = bh.name.toLowerCase();
+      const isDoneToday = !!(bh.log && bh.log[today]);
+
+      const existingIdx = updated.findIndex(
+        (h) =>
+          h.habit_id === bh.id ||
+          h.name.toLowerCase() === bhLower ||
+          bhLower.includes(h.name.toLowerCase()) ||
+          h.name.toLowerCase().includes(bhLower)
+      );
+
+      if (existingIdx >= 0) {
+        if (isDoneToday && !updated[existingIdx].isComplete) {
+          updated[existingIdx].isComplete = true;
+          updated[existingIdx].currentReps = updated[existingIdx].quota;
+        }
+      } else {
+        updated.push(parseHabitToHabitItem(bh, isDoneToday));
+      }
+    }
+    saveHabitsState(updated);
+    currentHabits = updated;
+  }
+
+  return currentHabits;
+}
+
+/**
+ * Formats an exercise name for display on the Physical Ignition screen:
+ * Extracts clean title and optional subtitle (e.g. "Morning", "Night")
+ */
+export function formatExerciseDisplay(name: string): { title: string; subtitle?: string } {
+  let title = name
+    .replace(/\b\d+(\s*(s|sec|seconds|reps|m|min))?\b/gi, '')
+    .replace(/\s*\((mrng|nt|morning|night|evening)\)\s*/gi, '')
+    .replace(/\s*(mrng|nt|morning|night|evening)\s*$/gi, '')
+    .replace(/^(morning|night|evening)\s+/gi, '')
+    .trim();
+
+  // Capitalize properly
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+
+  let subtitle: string | undefined = undefined;
+  if (/mrng|morning/i.test(name)) subtitle = 'Morning';
+  else if (/nt|night|evening/i.test(name)) subtitle = 'Night';
+
+  return { title, subtitle };
 }
 
 /**
@@ -204,10 +329,13 @@ export function getWeightedIgnitionPick(lastExercise?: string): { name: string; 
     };
   }
 
-  // Fallback when all habits are already cleared today:
+  // When all habits are already cleared today, cycle through the daily habits:
+  const options = habits.filter((h) => h.name !== lastExercise);
+  const chosen = options.length > 0 ? options[Math.floor(Math.random() * options.length)] : habits[0] || INITIAL_HABITS[0];
   return {
-    name: 'Movement Flush (Squats)',
-    reps: 15,
-    unit: 'reps',
+    name: chosen.name,
+    reps: chosen.quota,
+    unit: chosen.unit,
+    habitId: chosen.habit_id,
   };
 }

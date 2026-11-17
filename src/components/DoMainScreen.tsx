@@ -54,6 +54,8 @@ import {
   loadHabitsState,
   dismissHabit,
   HabitItem,
+  formatExerciseDisplay,
+  syncHabitsWithBoardData,
 } from '../services/focusHabits';
 import { ScatteredHabitsBackground } from './focus/ScatteredHabitsBackground';
 import {
@@ -98,7 +100,7 @@ interface Props {
 type DoStage = 'do_button' | 'ignition' | 'offer' | 'action_running';
 
 export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
-  const { settings, toggleTheme } = useMomentum();
+  const { settings, toggleTheme, boardData, toggleHabitDate } = useMomentum();
 
   // Navigation / Modal States
   const [stage, setStage] = useState<DoStage>('do_button');
@@ -177,6 +179,12 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [targetOverrideMode, setTargetOverrideMode] = useState<ServeMode>('paired');
   const neitherTimeoutRef = useRef<number | null>(null);
+
+  // Synchronize daily habits with Board / Google Tasks habits
+  useEffect(() => {
+    const synced = syncHabitsWithBoardData(boardData.habits);
+    setHabits(synced);
+  }, [boardData.habits]);
 
   // Screen wake lock during ignition and action execution
   useEffect(() => {
@@ -279,6 +287,18 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     const { updated, isAllClear } = dismissHabit(habit.habit_id);
     setHabits(updated);
     triggerHaptic([40]);
+
+    // Also mark done for today in boardData / Google Tasks
+    const todayStr = new Date().toISOString().split('T')[0];
+    const match = boardData.habits.find(
+      (h) =>
+        h.id === habit.habit_id ||
+        h.name.toLowerCase().includes(habit.name.toLowerCase()) ||
+        habit.name.toLowerCase().includes(h.name.toLowerCase())
+    );
+    if (match && !match.log[todayStr]) {
+      toggleHabitDate(match.id, todayStr);
+    }
 
     const habitWorkVal = 2;
     await queueEvent('habit_completed', {
@@ -391,6 +411,18 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     // Phase 7: Credit matching habit quota directly & clear from screen!
     const { updated, isAllClear } = creditHabitFromIgnition(currentExercise.name, currentExercise.reps);
     setHabits(updated);
+
+    // Also mark done for today in boardData / Google Tasks
+    const todayStr = new Date().toISOString().split('T')[0];
+    const match = boardData.habits.find(
+      (h) =>
+        h.id === (currentExercise as any).habitId ||
+        h.name.toLowerCase().includes(currentExercise.name.toLowerCase()) ||
+        currentExercise.name.toLowerCase().includes(h.name.toLowerCase())
+    );
+    if (match && !match.log[todayStr]) {
+      toggleHabitDate(match.id, todayStr);
+    }
 
     const habitWorkVal = 2;
     await queueEvent('ignition_done', {
@@ -899,9 +931,21 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
               <span>Physical Ignition</span>
             </div>
 
-            <div className="text-4xl sm:text-5xl font-black text-white tracking-tight mb-2">
-              {currentExercise.name}
-            </div>
+            {(() => {
+              const display = formatExerciseDisplay(currentExercise.name);
+              return (
+                <div className="mb-2">
+                  <div className="text-4xl sm:text-5xl font-black text-white tracking-tight">
+                    {display.title}
+                  </div>
+                  {display.subtitle && (
+                    <div className="text-xs uppercase font-extrabold text-amber-400/90 tracking-widest mt-1">
+                      {display.subtitle}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="text-6xl sm:text-7xl font-black text-purple-400 my-4 tracking-tighter">
               {currentExercise.reps}{' '}

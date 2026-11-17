@@ -47,27 +47,28 @@ export interface ServingState {
   lastExercise?: string;
 }
 
+import { getWeightedIgnitionPick } from './focusHabits';
+
 export interface IgnitionExercise {
   name: string;
   reps: number;
   unit: string;
   tip?: string;
+  habitId?: string;
 }
 
-export const IGNITION_EXERCISES: IgnitionExercise[] = [
-  { name: 'Push-ups', reps: 10, unit: 'reps' },
-  { name: 'Crunches', reps: 15, unit: 'reps' },
-  { name: 'Squats', reps: 15, unit: 'reps' },
-  { name: 'Jumping Jacks', reps: 20, unit: 'reps' },
-];
-
 /**
- * Weighted pick of exercise, never repeating the same one twice in a row
+ * All physical triggers and exercises are sourced strictly from daily habits.
+ * No separate physical trigger list exists.
  */
 export function pickNextExercise(lastExercise?: string): IgnitionExercise {
-  const candidates = IGNITION_EXERCISES.filter((e) => e.name !== lastExercise);
-  const choice = candidates[Math.floor(Math.random() * candidates.length)];
-  return { ...choice };
+  const pick = getWeightedIgnitionPick(lastExercise);
+  return {
+    name: pick.name,
+    reps: pick.reps,
+    unit: pick.unit,
+    habitId: pick.habitId,
+  };
 }
 
 /**

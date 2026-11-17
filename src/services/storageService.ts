@@ -90,18 +90,66 @@ export const DEFAULT_INITIAL_DATA: MomentumBoardData = {
   habits: [
     {
       id: 'hab-1',
-      name: 'Morning Push-ups (50 reps)',
+      name: 'Push-ups 50 (mrng)',
       type: 'boolean',
-      target: 1,
+      target: 50,
       next_due: 'Daily Morning',
       log: {},
     },
     {
       id: 'hab-2',
-      name: 'Night Push-ups (50 reps)',
+      name: 'Push-ups 50 (nt)',
+      type: 'boolean',
+      target: 50,
+      next_due: 'Daily Night',
+      log: {},
+    },
+    {
+      id: 'hab-3',
+      name: 'Squats 30',
+      type: 'boolean',
+      target: 30,
+      next_due: 'Daily',
+      log: {},
+    },
+    {
+      id: 'hab-4',
+      name: 'Plank 60s',
+      type: 'boolean',
+      target: 60,
+      next_due: 'Daily',
+      log: {},
+    },
+    {
+      id: 'hab-5',
+      name: 'Hip Mobility 1',
       type: 'boolean',
       target: 1,
-      next_due: 'Daily Night',
+      next_due: 'Daily',
+      log: {},
+    },
+    {
+      id: 'hab-6',
+      name: 'Pull-ups 10',
+      type: 'boolean',
+      target: 10,
+      next_due: 'Daily',
+      log: {},
+    },
+    {
+      id: 'hab-7',
+      name: 'Crunches 30',
+      type: 'boolean',
+      target: 30,
+      next_due: 'Daily',
+      log: {},
+    },
+    {
+      id: 'hab-8',
+      name: 'Reverse Plank 45s',
+      type: 'boolean',
+      target: 45,
+      next_due: 'Daily',
       log: {},
     },
   ],
@@ -228,6 +276,23 @@ export function loadLocalBoardData(): MomentumBoardData {
     const raw = localStorage.getItem(LOCAL_STORAGE_DATA_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      const rawHabits = Array.isArray(parsed.habits) ? [...parsed.habits] : [...DEFAULT_INITIAL_DATA.habits];
+      for (const defHabit of DEFAULT_INITIAL_DATA.habits) {
+        const defLower = defHabit.name.toLowerCase().replace(/\s*\(\d+\s*reps\)/gi, '').trim();
+        const existingIdx = rawHabits.findIndex((h: any) => {
+          const l = (h.name || '').toLowerCase();
+          return h.id === defHabit.id || l.includes(defLower) || defLower.includes(l);
+        });
+        if (existingIdx === -1) {
+          rawHabits.push(defHabit);
+        } else {
+          if (rawHabits[existingIdx].name !== defHabit.name && defHabit.name.startsWith('Push-ups')) {
+            rawHabits[existingIdx].name = defHabit.name;
+            rawHabits[existingIdx].target = defHabit.target;
+          }
+        }
+      }
+
       return {
         ...DEFAULT_INITIAL_DATA,
         ...parsed,
@@ -240,9 +305,7 @@ export function loadLocalBoardData(): MomentumBoardData {
         projects: Array.isArray(parsed.projects)
           ? parsed.projects
           : DEFAULT_INITIAL_DATA.projects,
-        habits: Array.isArray(parsed.habits)
-          ? parsed.habits
-          : DEFAULT_INITIAL_DATA.habits,
+        habits: rawHabits,
         calendar_events: Array.isArray(parsed.calendar_events)
           ? parsed.calendar_events
           : DEFAULT_INITIAL_DATA.calendar_events,
