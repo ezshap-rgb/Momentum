@@ -58,6 +58,7 @@ import {
   syncHabitsWithBoardData,
 } from '../services/focusHabits';
 import { ScatteredHabitsBackground } from './focus/ScatteredHabitsBackground';
+import { HabitsModal } from './HabitsModal';
 import {
   getExperimentScheduleStatus,
   overrideExperimentMode,
@@ -90,6 +91,7 @@ import {
   Layers,
   ShieldCheck,
   Watch,
+  Activity,
 } from 'lucide-react';
 
 interface Props {
@@ -109,6 +111,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [showParkingLot, setShowParkingLot] = useState(false);
   const [parkingLotText, setParkingLotText] = useState('');
   const [showWhyThisOne, setShowWhyThisOne] = useState(false);
+  const [showHabitsModal, setShowHabitsModal] = useState(false);
 
   // Doorway Config
   const [url, setUrl] = useState('');
@@ -859,16 +862,15 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <SyncIndicator />
 
-          {onOpenPlanMode && (
-            <button
-              onClick={onOpenPlanMode}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-purple-500/40 rounded-xl text-xs font-semibold text-purple-300 transition shadow-sm shrink-0"
-              title="Open Plan Mode (Calm Review, Pool & Settings)"
-            >
-              <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden sm:inline">Plan</span>
-            </button>
-          )}
+          {/* Habits Manager Button (Replaces Plan on top) */}
+          <button
+            onClick={() => setShowHabitsModal(true)}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-pink-500/40 rounded-xl text-xs font-semibold text-pink-400 transition shadow-sm shrink-0"
+            title="Open Daily Habits Manager (Edit Quotas & Rhythms)"
+          >
+            <Activity className="w-3.5 h-3.5 text-pink-400" />
+            <span className="hidden sm:inline">Habits</span>
+          </button>
 
           <button
             onClick={onOpenTaskView}
@@ -1456,6 +1458,18 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         <span className="hidden xs:inline text-[10px]">Focus Action Layer</span>
 
         <div className="flex items-center gap-1.5 ml-auto">
+          {/* Plan Mode Button (Moved to bottom, directly left of Bench) */}
+          {onOpenPlanMode && (
+            <button
+              onClick={onOpenPlanMode}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-slate-400 hover:text-purple-300 transition active:scale-95"
+              title="Open Plan Mode (Calm Review, Pool & Settings)"
+            >
+              <Layers className="w-3 h-3 text-purple-400" />
+              <span className="text-[10px] font-medium">Plan</span>
+            </button>
+          )}
+
           {/* Watchmaker Bench Progress */}
           <button
             onClick={() => setShowBenchModal(true)}
@@ -1596,6 +1610,14 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
             setShowFridaySummary(false);
             setShowCollectionModal(true);
           }}
+        />
+      )}
+
+      {/* Daily Habits Manager Modal */}
+      {showHabitsModal && (
+        <HabitsModal
+          isOpen={showHabitsModal}
+          onClose={() => setShowHabitsModal(false)}
         />
       )}
 

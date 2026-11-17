@@ -16,6 +16,7 @@ import {
   Undo2,
   Zap,
   Layers,
+  Activity,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,6 +24,7 @@ interface HeaderProps {
   onOpenVoiceIngest: () => void;
   onOpenDoMode?: () => void;
   onOpenPlanMode?: () => void;
+  onOpenHabits?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVoiceIngest,
   onOpenDoMode,
   onOpenPlanMode,
+  onOpenHabits,
 }) => {
   const {
     settings,
@@ -135,15 +138,15 @@ export const Header: React.FC<HeaderProps> = ({
             <span>DO</span>
           </button>
 
-          {/* Plan Mode Button */}
-          {onOpenPlanMode && (
+          {/* Habits Manager Button (Replaces Plan on top) */}
+          {onOpenHabits && (
             <button
-              onClick={onOpenPlanMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-purple-600 dark:text-purple-300 border border-purple-500/30 transition shrink-0 active:scale-95"
-              title="Open Plan Mode (Calm Review, Pool & Settings)"
+              onClick={onOpenHabits}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-pink-600 dark:text-pink-400 border border-pink-500/30 transition shrink-0 active:scale-95"
+              title="Open Daily Habits Manager (Edit Quotas & Rhythms)"
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Plan</span>
+              <Activity className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Habits</span>
             </button>
           )}
 

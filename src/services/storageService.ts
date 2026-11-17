@@ -293,6 +293,21 @@ export function loadLocalBoardData(): MomentumBoardData {
         }
       }
 
+      // Deduplicate habits by normalized name so accumulated duplicates are cleaned up
+      const seenHabits = new Map<string, any>();
+      for (const h of rawHabits) {
+        const norm = (h.name || '').toLowerCase().replace(/^habit:\s*/i, '').replace(/\s+/g, ' ').trim();
+        if (!seenHabits.has(norm)) {
+          seenHabits.set(norm, h);
+        } else {
+          const existing = seenHabits.get(norm);
+          if (h.log) {
+            existing.log = { ...existing.log, ...h.log };
+          }
+        }
+      }
+      const deduplicatedHabits = Array.from(seenHabits.values());
+
       return {
         ...DEFAULT_INITIAL_DATA,
         ...parsed,
@@ -305,7 +320,7 @@ export function loadLocalBoardData(): MomentumBoardData {
         projects: Array.isArray(parsed.projects)
           ? parsed.projects
           : DEFAULT_INITIAL_DATA.projects,
-        habits: rawHabits,
+        habits: deduplicatedHabits,
         calendar_events: Array.isArray(parsed.calendar_events)
           ? parsed.calendar_events
           : DEFAULT_INITIAL_DATA.calendar_events,

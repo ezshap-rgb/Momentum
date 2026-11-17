@@ -398,10 +398,19 @@ export function parseStepsFromNotes(notes?: string | null): string[] {
   return steps;
 }
 
+export function normalizeHabitName(name: string): string {
+  return (name || '')
+    .toLowerCase()
+    .replace(/^habit:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Intelligent parser & two-way synchronizer that:
  * 1. Prunes tasks that were deleted or completed in Google Tasks.
- * 2. Ingests new tasks and updates existing tasks across Momentum's 4 ADHD buckets.
+ * 2. Ingests new tasks and updates existing tasks across Momentum's ADHD buckets.
+ * 3. Daily habits are persistent definitions and are NEVER pruned or multiplied.
  */
 export function syncTasksIntoBoard(
   boardData: MomentumBoardData,
@@ -552,31 +561,9 @@ export function syncTasksIntoBoard(
     return true;
   });
 
-  const habits = boardData.habits.filter((h) => {
-    if (isProtectedFromPruning(undefined, h.googleTaskId)) {
-      return true;
-    }
-
-    if (h.googleTaskId && deletedTaskIds.has(h.googleTaskId)) {
-      removedTasks++;
-      return false;
-    }
-
-    if (h.googleTaskId && !activeGoogleTasks.has(h.googleTaskId)) {
-      removedTasks++;
-      return false;
-    }
-
-    if (h.id.startsWith('gt-hab-')) {
-      const gId = h.googleTaskId;
-      if (!gId || !activeGoogleTasks.has(gId)) {
-        removedTasks++;
-        return false;
-      }
-    }
-
-    return true;
-  });
+  // Habits are persistent templates for daily tracking.
+  // They are never pruned when their Google Tasks are completed.
+  const habits = [...boardData.habits];
 
   // Helper set of existing task titles and googleTaskIds to avoid duplicates
   const existingJobKeys = new Set(quickJobs.map((j) => j.googleTaskId || j.title.toLowerCase().trim()));
@@ -762,8 +749,13 @@ export function syncTasksIntoBoard(
           });
         }
 
-        const key = taskId || habitName.toLowerCase();
-        if (!existingHabitKeys.has(key)) {
+        const normHabitName = normalizeHabitName(habitName);
+        const existing = habits.find((h) => {
+          if (taskId && h.googleTaskId === taskId) return true;
+          return normalizeHabitName(h.name) === normHabitName;
+        });
+
+        if (!existing) {
           habits.push({
             id: `gt-hab-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             name: habitName,
@@ -774,13 +766,13 @@ export function syncTasksIntoBoard(
             googleTaskId: taskId,
             googleTaskListId: listId,
           });
-          existingHabitKeys.add(key);
           addedHabits++;
         } else {
-          const existing = habits.find((h) => h.googleTaskId === taskId || h.name.toLowerCase().trim() === habitName.toLowerCase());
-          if (existing) {
-            existing.googleTaskId = taskId;
-            existing.googleTaskListId = listId;
+          existing.googleTaskId = taskId;
+          existing.googleTaskListId = listId;
+          if (task.status === 'completed') {
+            const todayStr = new Date().toISOString().split('T')[0];
+            existing.log[todayStr] = true;
           }
         }
         continue;
