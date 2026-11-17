@@ -51,7 +51,11 @@ import {
   creditHabitFromIgnition,
   getWeightedIgnitionPick,
   addPowerReserve,
+  loadHabitsState,
+  dismissHabit,
+  HabitItem,
 } from '../services/focusHabits';
+import { ScatteredHabitsBackground } from './focus/ScatteredHabitsBackground';
 import {
   getExperimentScheduleStatus,
   overrideExperimentMode,
@@ -126,8 +130,19 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [currentScoreData, setCurrentScoreData] = useState<CandidateScore | null>(null);
   const [showInspector, setShowInspector] = useState(false);
 
-  // Current ignition exercise
-  const [currentExercise, setCurrentExercise] = useState<IgnitionExercise>(() => pickNextExercise());
+  // Daily Habits State (Scattered background & Ignition link)
+  const [habits, setHabits] = useState<HabitItem[]>(() => loadHabitsState());
+  const [allClearCelebration, setAllClearCelebration] = useState(false);
+
+  // Current ignition exercise sourced directly from uncleared habits with full quota
+  const [currentExercise, setCurrentExercise] = useState<IgnitionExercise>(() => {
+    const pick = getWeightedIgnitionPick();
+    return {
+      name: pick.name,
+      reps: pick.reps,
+      unit: (pick.unit as any) || 'reps',
+    };
+  });
 
   // Watch Movement & Rewards (Phase 6)
   const [showBenchModal, setShowBenchModal] = useState(false);
@@ -260,9 +275,48 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     proceedToIgnition();
   };
 
+  const handleDismissHabit = async (habit: HabitItem) => {
+    const { updated, isAllClear } = dismissHabit(habit.habit_id);
+    setHabits(updated);
+    triggerHaptic([40]);
+
+    const habitWorkVal = 2;
+    await queueEvent('habit_completed', {
+      habit_id: habit.habit_id,
+      name: habit.name,
+      quota: habit.quota,
+      work_value: habitWorkVal,
+    });
+
+    setDayModule((prev) => {
+      const newWork = prev.total_work_done + habitWorkVal;
+      return {
+        ...prev,
+        total_work_done: newWork,
+        is_closed: prev.is_closed || newWork >= prev.committed_work_points,
+      };
+    });
+
+    if (isAllClear) {
+      const bonusPts = 5;
+      await queueEvent('all_habits_cleared', { bonus_points: bonusPts });
+      setDayModule((prev) => ({
+        ...prev,
+        total_work_done: prev.total_work_done + bonusPts,
+      }));
+      setAllClearCelebration(true);
+      setTimeout(() => setAllClearCelebration(false), 5000);
+    }
+  };
+
   const proceedToIgnition = async () => {
-    // Phase 7: Weighted ignition pick favoring habits with quota left
-    const nextEx = getWeightedIgnitionPick(currentExercise.name);
+    // Sourced directly from uncleared daily habits with full quota
+    const pick = getWeightedIgnitionPick(currentExercise.name);
+    const nextEx: IgnitionExercise = {
+      name: pick.name,
+      reps: pick.reps,
+      unit: (pick.unit as any) || 'reps',
+    };
     setCurrentExercise(nextEx);
     setStage('ignition');
     addPowerReserve(2); // +2 winding ticks per DO press
@@ -334,14 +388,37 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
 
   // 3. ZERO-TAP BRIDGE: Finish Ignition -> Immediately show Offer
   const handleIgnitionDone = async () => {
-    // Phase 7: Credit matching habit quota directly!
-    creditHabitFromIgnition(currentExercise.name, currentExercise.reps);
+    // Phase 7: Credit matching habit quota directly & clear from screen!
+    const { updated, isAllClear } = creditHabitFromIgnition(currentExercise.name, currentExercise.reps);
+    setHabits(updated);
 
+    const habitWorkVal = 2;
     await queueEvent('ignition_done', {
       exercise: currentExercise.name,
       reps: currentExercise.reps,
       credited_habit: true,
+      work_value: habitWorkVal,
     });
+
+    setDayModule((prev) => {
+      const newWork = prev.total_work_done + habitWorkVal;
+      return {
+        ...prev,
+        total_work_done: newWork,
+        is_closed: prev.is_closed || newWork >= prev.committed_work_points,
+      };
+    });
+
+    if (isAllClear) {
+      const bonusPts = 5;
+      await queueEvent('all_habits_cleared', { bonus_points: bonusPts });
+      setDayModule((prev) => ({
+        ...prev,
+        total_work_done: prev.total_work_done + bonusPts,
+      }));
+      setAllClearCelebration(true);
+      setTimeout(() => setAllClearCelebration(false), 5000);
+    }
 
     serveNextOffer(consecutiveNotNows);
   };
@@ -784,6 +861,15 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
           </button>
         </div>
       </div>
+
+      {/* SCATTERED HABITS BACKGROUND (Disappear over the day with 1 tap, accessible anytime) */}
+      {!showConfig && (
+        <ScatteredHabitsBackground
+          habits={habits}
+          onDismiss={handleDismissHabit}
+          isAllClear={allClearCelebration}
+        />
+      )}
 
       {/* STAGE 1: GIANT DO BUTTON */}
       {stage === 'do_button' && !showConfig && (

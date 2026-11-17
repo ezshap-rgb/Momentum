@@ -35,32 +35,102 @@ export interface GearState {
 
 export const INITIAL_HABITS: HabitItem[] = [
   // Half A
-  { habit_id: 'pushups', name: 'Push-ups', half: 'A', circuit: 'both', quota: 15, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'squats', name: 'Squats', half: 'A', circuit: 'both', quota: 20, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'plank', name: 'Plank', half: 'A', circuit: 'both', quota: 45, unit: 'seconds', currentReps: 0, isComplete: false },
-  { habit_id: 'hip_mobility', name: 'Hip Mobility Cycle', half: 'A', circuit: 'both', quota: 1, unit: 'cycle', currentReps: 0, isComplete: false },
+  { habit_id: 'pushups_mrng', name: 'Push-ups 50 (mrng)', half: 'A', circuit: 'morning', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'pushups_nt', name: 'Push-ups 50 (nt)', half: 'A', circuit: 'evening', quota: 50, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'squats', name: 'Squats 30', half: 'A', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'plank', name: 'Plank 60s', half: 'A', circuit: 'both', quota: 60, unit: 'seconds', currentReps: 0, isComplete: false },
+  { habit_id: 'hip_mobility', name: 'Hip Mobility 1', half: 'A', circuit: 'both', quota: 1, unit: 'cycle', currentReps: 0, isComplete: false },
   // Half B
-  { habit_id: 'pullups', name: 'Pull-ups', half: 'B', circuit: 'both', quota: 8, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'crunches', name: 'Crunches', half: 'B', circuit: 'both', quota: 20, unit: 'reps', currentReps: 0, isComplete: false },
-  { habit_id: 'reverse_plank', name: 'Reverse Plank', half: 'B', circuit: 'both', quota: 30, unit: 'seconds', currentReps: 0, isComplete: false },
+  { habit_id: 'pullups', name: 'Pull-ups 10', half: 'B', circuit: 'both', quota: 10, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'crunches', name: 'Crunches 30', half: 'B', circuit: 'both', quota: 30, unit: 'reps', currentReps: 0, isComplete: false },
+  { habit_id: 'reverse_plank', name: 'Reverse Plank 45s', half: 'B', circuit: 'both', quota: 45, unit: 'seconds', currentReps: 0, isComplete: false },
 ];
 
 const STORAGE_KEYS = {
   HABITS: 'focus_habits_state',
+  LAST_HABITS_DATE: 'focus_last_habits_date',
   POWER_RESERVE: 'focus_power_reserve',
   LAST_RESERVE_DATE: 'focus_last_reserve_date',
 };
 
+export function getTodayDateString(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
 export function loadHabitsState(): HabitItem[] {
+  const today = getTodayDateString();
+  const lastDate = localStorage.getItem(STORAGE_KEYS.LAST_HABITS_DATE);
+
+  let habits: HabitItem[] = [];
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.HABITS);
-    if (raw) return JSON.parse(raw);
+    if (raw) habits = JSON.parse(raw);
   } catch (_) {}
-  return INITIAL_HABITS.map((h) => ({ ...h }));
+
+  if (!habits || habits.length === 0) {
+    habits = INITIAL_HABITS.map((h) => ({ ...h }));
+    saveHabitsState(habits);
+    localStorage.setItem(STORAGE_KEYS.LAST_HABITS_DATE, today);
+    return habits;
+  }
+
+  // Daily refresh: If it's a new day, reset all habit completions so they scatter fresh!
+  if (lastDate !== today) {
+    habits = habits.map((h) => ({
+      ...h,
+      currentReps: 0,
+      isComplete: false,
+    }));
+    saveHabitsState(habits);
+    localStorage.setItem(STORAGE_KEYS.LAST_HABITS_DATE, today);
+  }
+
+  return habits;
 }
 
 export function saveHabitsState(habits: HabitItem[]): void {
   localStorage.setItem(STORAGE_KEYS.HABITS, JSON.stringify(habits));
+}
+
+export function dismissHabit(habitId: string): { updated: HabitItem[]; isAllClear: boolean } {
+  const habits = loadHabitsState();
+  const updated = habits.map((h) =>
+    h.habit_id === habitId ? { ...h, currentReps: h.quota, isComplete: true } : h
+  );
+  saveHabitsState(updated);
+  const isAllClear = updated.every((h) => h.isComplete);
+  return { updated, isAllClear };
+}
+
+/**
+ * Concise compact 2-line formatter for background scattered habits:
+ * Line 1: action + amount (e.g. "push up 50")
+ * Line 2: window / timing (e.g. "mrng", "nt", "daily")
+ */
+export function formatHabitCompact(habit: HabitItem): { line1: string; line2: string } {
+  let name = habit.name.trim();
+  const lower = name.toLowerCase();
+
+  const isMrng = lower.includes('mrng') || lower.includes('morning') || habit.circuit === 'morning';
+  const isNt = lower.includes('nt') || lower.includes('night') || lower.includes('evening') || habit.circuit === 'evening';
+
+  let cleanName = name
+    .replace(/(push-ups|pushups)/gi, 'push up')
+    .replace(/(pull-ups|pullups)/gi, 'pull up')
+    .replace(/\s*\((mrng|nt|morning|night|evening)\)\s*/gi, '')
+    .replace(/\s*(mrng|nt|morning|night|evening)\s*$/gi, '')
+    .trim();
+
+  // If number isn't in name, append quota
+  if (!/\d/.test(cleanName) && habit.quota) {
+    const unitSuffix = habit.unit === 'seconds' ? 's' : '';
+    cleanName = `${cleanName} ${habit.quota}${unitSuffix}`;
+  }
+
+  const line1 = cleanName.toLowerCase();
+  const line2 = isMrng ? 'mrng' : isNt ? 'nt' : habit.unit === 'seconds' ? 'timed' : 'daily';
+
+  return { line1, line2 };
 }
 
 export function getPowerReserve(): number {
@@ -80,65 +150,63 @@ export function addPowerReserve(ticks: number = 2): number {
 
 /**
  * Direct ignition credit: when user completes an exercise during ignition,
- * credit matching habit quota immediately!
+ * credit matching habit quota immediately and clear it from the screen!
  */
-export function creditHabitFromIgnition(exerciseName: string, reps: number): HabitItem[] {
+export function creditHabitFromIgnition(exerciseName: string, reps: number): { updated: HabitItem[]; isAllClear: boolean } {
   const habits = loadHabitsState();
   const lowerName = exerciseName.toLowerCase();
 
   const updated = habits.map((h) => {
-    if (h.name.toLowerCase().includes(lowerName) || lowerName.includes(h.name.toLowerCase())) {
-      const nextReps = h.currentReps + reps;
+    const habitLower = h.name.toLowerCase();
+    if (
+      habitLower === lowerName ||
+      habitLower.includes(lowerName) ||
+      lowerName.includes(habitLower) ||
+      (lowerName.includes('push') && habitLower.includes('push')) ||
+      (lowerName.includes('squat') && habitLower.includes('squat')) ||
+      (lowerName.includes('crun') && habitLower.includes('crun')) ||
+      (lowerName.includes('pull') && habitLower.includes('pull')) ||
+      (lowerName.includes('plank') && habitLower.includes('plank'))
+    ) {
+      const nextReps = Math.max(h.currentReps + reps, h.quota);
       return {
         ...h,
         currentReps: nextReps,
-        isComplete: nextReps >= h.quota,
+        isComplete: true,
       };
     }
     return h;
   });
 
   saveHabitsState(updated);
-  return updated;
+  const isAllClear = updated.every((h) => h.isComplete);
+  return { updated, isAllClear };
 }
 
 /**
- * Weighted random ignition pick:
- * weight = remaining quota fraction + 0.2, so it stays random but leans toward what is owed.
+ * Ignition triggers sourced directly from uncleared habits with FULL quotas!
  */
-export function getWeightedIgnitionPick(lastExercise?: string): { name: string; reps: number; unit: string } {
+export function getWeightedIgnitionPick(lastExercise?: string): { name: string; reps: number; unit: string; habitId?: string } {
   const habits = loadHabitsState();
-  const candidates = [
-    { name: 'Push-ups', reps: 10, unit: 'reps', habitId: 'pushups' },
-    { name: 'Crunches', reps: 15, unit: 'reps', habitId: 'crunches' },
-    { name: 'Squats', reps: 15, unit: 'reps', habitId: 'squats' },
-    { name: 'Jumping Jacks', reps: 20, unit: 'reps', habitId: null }, // constant
-  ].filter((c) => c.name !== lastExercise);
+  // Filter for uncleared habits
+  const uncleared = habits.filter((h) => !h.isComplete);
 
-  // Compute weights
-  const weighted = candidates.map((cand) => {
-    let weight = 0.2;
-    if (cand.habitId) {
-      const h = habits.find((it) => it.habit_id === cand.habitId);
-      if (h && !h.isComplete) {
-        const remainingFraction = Math.max(0, (h.quota - h.currentReps) / h.quota);
-        weight += remainingFraction * 0.8;
-      }
-    } else {
-      weight = 0.35; // Jumping Jacks baseline
-    }
-    return { cand, weight };
-  });
-
-  const totalWeight = weighted.reduce((acc, w) => acc + w.weight, 0);
-  let randomVal = Math.random() * totalWeight;
-
-  for (const item of weighted) {
-    if (randomVal < item.weight) {
-      return item.cand;
-    }
-    randomVal -= item.weight;
+  if (uncleared.length > 0) {
+    // Pick an uncleared habit (preferring one different from lastExercise if possible)
+    const options = uncleared.filter((h) => h.name !== lastExercise);
+    const chosen = options.length > 0 ? options[Math.floor(Math.random() * options.length)] : uncleared[0];
+    return {
+      name: chosen.name,
+      reps: chosen.quota,
+      unit: chosen.unit,
+      habitId: chosen.habit_id,
+    };
   }
 
-  return candidates[0];
+  // Fallback when all habits are already cleared today:
+  return {
+    name: 'Movement Flush (Squats)',
+    reps: 15,
+    unit: 'reps',
+  };
 }

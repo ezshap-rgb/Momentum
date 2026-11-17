@@ -217,15 +217,10 @@ export function rankCandidates(
   // Filter available
   const available = actions.filter((a) => {
     if (a.status !== 'waiting' && a.status !== 'served') return false;
-    if (a.category === 'habit') return false;
+    // Daily habits are separate from the action flow (scattered background only)
+    if (a.category === 'habit' || isPhysicalExerciseAction(a)) return false;
     if (ctx.skippedTaskIds.has(a.task_id)) return false;
     if (a.snoozed_until && new Date(a.snoozed_until) > now) return false;
-
-    // Rule: Never serve physical exercise as the first action after physical ignition
-    // (Physical ignition breaks inertia; the first action must be an administrative / work responsibility)
-    if (ctx.completedActions.length === 0 && isPhysicalExerciseAction(a)) {
-      return false;
-    }
 
     return true;
   });

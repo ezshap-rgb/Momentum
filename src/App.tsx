@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { MomentumProvider, useMomentum } from './context/MomentumContext';
 import { Header } from './components/Header';
 import { QuickJobsPanel } from './components/panels/QuickJobsPanel';
-import { HabitsPanel } from './components/panels/HabitsPanel';
 import { BiggerJobsPanel } from './components/panels/BiggerJobsPanel';
 import { ProjectsPanel } from './components/panels/ProjectsPanel';
 import { CalendarPanel } from './components/CalendarPanel';
@@ -17,7 +16,7 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [mobileTab, setMobileTab] = useState<'quick' | 'habits' | 'bigger' | 'projects'>('quick');
+  const [mobileTab, setMobileTab] = useState<'quick' | 'bigger' | 'projects'>('quick');
   const { panelStates, boardData, layoutMode, undo, lastUndoMessage, dismissUndoMessage } = useMomentum();
 
   const showCalendar = panelStates.calendar !== 'hidden';
@@ -47,11 +46,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
   const activeQuickCount = boardData.quick_jobs.filter((j) => !j.done).length;
   const activeRespCount = boardData.responsibilities.filter((r) => r.status === 'active').length;
   const activeProjCount = boardData.projects.length;
-  const completedHabitsToday = boardData.habits.filter((h) => {
-    const today = new Date().toISOString().split('T')[0];
-    const val = h.log[today];
-    return h.type === 'boolean' ? !!val : typeof val === 'number' && val > 0;
-  }).length;
 
   return (
     <div className="h-screen max-h-screen w-screen overflow-hidden flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 selection:bg-purple-600 selection:text-white transition-colors">
@@ -97,25 +91,20 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
           </div>
         )}
 
-        {/* COCKPIT 2x2 EQUAL GRID */}
+        {/* COCKPIT 3-COLUMN EQUAL GRID (Tasks, Jobs, Projects) */}
         {layoutMode === 'cockpit' ? (
-          <div className="hidden md:grid md:grid-cols-2 md:grid-rows-2 gap-2.5 flex-1 min-h-0 overflow-hidden">
-            {/* Top Left: Quick Jobs */}
+          <div className="hidden md:grid md:grid-cols-3 gap-2.5 flex-1 min-h-0 overflow-hidden">
+            {/* Left: Tasks (Quick Jobs) */}
             <div className="h-full min-h-0 overflow-hidden">
               <QuickJobsPanel />
             </div>
 
-            {/* Top Right: Habits & Daily Rhythms */}
-            <div className="h-full min-h-0 overflow-hidden">
-              <HabitsPanel />
-            </div>
-
-            {/* Bottom Left: Bigger Jobs & Responsibilities */}
+            {/* Middle: Jobs & Responsibilities */}
             <div className="h-full min-h-0 overflow-hidden">
               <BiggerJobsPanel />
             </div>
 
-            {/* Bottom Right: Ongoing Creative Projects */}
+            {/* Right: Ongoing Creative Projects */}
             <div className="h-full min-h-0 overflow-hidden">
               <ProjectsPanel />
             </div>
@@ -125,9 +114,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
           <div className="hidden md:flex flex-col gap-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
             <div className="min-h-[170px] shrink-0">
               <QuickJobsPanel />
-            </div>
-            <div className="min-h-[170px] shrink-0">
-              <HabitsPanel />
             </div>
             <div className="min-h-[170px] shrink-0">
               <BiggerJobsPanel />
@@ -141,7 +127,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
         {/* MOBILE VIEW (Tabbed Switcher with thumb bar) */}
         <div className="md:hidden flex-1 min-h-0 overflow-y-auto pb-16">
           {mobileTab === 'quick' && <QuickJobsPanel />}
-          {mobileTab === 'habits' && <HabitsPanel />}
           {mobileTab === 'bigger' && <BiggerJobsPanel />}
           {mobileTab === 'projects' && <ProjectsPanel />}
         </div>
@@ -166,23 +151,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
             )}
           </div>
           <span className="text-[10px]">Tasks</span>
-        </button>
-
-        <button
-          onClick={() => setMobileTab('habits')}
-          className={`flex flex-col items-center gap-1 transition ${
-            mobileTab === 'habits'
-              ? 'text-pink-600 dark:text-pink-400 font-bold'
-              : 'text-slate-400'
-          }`}
-        >
-          <div className="relative">
-            <Activity className="w-4 h-4" />
-            <span className="absolute -top-1 -right-2 px-1 text-[8px] font-bold rounded-full bg-pink-600 text-white">
-              {completedHabitsToday}
-            </span>
-          </div>
-          <span className="text-[10px]">Habits</span>
         </button>
 
         {/* Center Voice Mic */}
