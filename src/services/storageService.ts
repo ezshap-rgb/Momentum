@@ -233,6 +233,73 @@ export function saveSettingsToStorage(settings: AppSettings): void {
 }
 
 const DELETED_GTASKS_KEY = 'momentum_deleted_gtasks_v1';
+const PENDING_GTASKS_OPS_KEY = 'momentum_pending_gtasks_ops_v1';
+
+export interface PendingGoogleTaskOp {
+  taskId: string;
+  listId: string;
+  action: 'complete' | 'delete';
+  timestamp: number;
+}
+
+export function getPendingGoogleTaskOps(): PendingGoogleTaskOp[] {
+  try {
+    const raw = localStorage.getItem(PENDING_GTASKS_OPS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (op) =>
+            op &&
+            typeof op.taskId === 'string' &&
+            op.taskId.trim().length > 0 &&
+            !op.taskId.includes(' ') &&
+            (op.action === 'complete' || op.action === 'delete')
+        );
+      }
+    }
+  } catch {}
+  return [];
+}
+
+export function enqueuePendingGoogleTaskOp(op: PendingGoogleTaskOp): void {
+  if (!op || !op.taskId || op.taskId.trim().length === 0 || op.taskId.includes(' ')) return;
+  try {
+    const ops = getPendingGoogleTaskOps();
+    const idx = ops.findIndex((existing) => existing.taskId === op.taskId);
+    const normalizedOp: PendingGoogleTaskOp = {
+      taskId: op.taskId.trim(),
+      listId: op.listId || '@default',
+      action: op.action,
+      timestamp: op.timestamp || Date.now(),
+    };
+    if (idx >= 0) {
+      const existing = ops[idx];
+      ops[idx] = {
+        ...normalizedOp,
+        action: existing.action === 'delete' ? 'delete' : normalizedOp.action,
+      };
+    } else {
+      ops.push(normalizedOp);
+    }
+    localStorage.setItem(PENDING_GTASKS_OPS_KEY, JSON.stringify(ops));
+  } catch (e) {
+    console.error('Failed to enqueue pending Google Task op:', e);
+  }
+}
+
+export function removePendingGoogleTaskOp(taskId: string): void {
+  if (!taskId || taskId.includes(' ')) return;
+  try {
+    const ops = getPendingGoogleTaskOps();
+    const filtered = ops.filter((op) => op.taskId !== taskId);
+    if (filtered.length !== ops.length) {
+      localStorage.setItem(PENDING_GTASKS_OPS_KEY, JSON.stringify(filtered));
+    }
+  } catch (e) {
+    console.error('Failed to remove pending Google Task op:', e);
+  }
+}
 
 export function getDeletedGoogleTaskIds(): Set<string> {
   try {

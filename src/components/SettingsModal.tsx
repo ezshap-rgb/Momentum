@@ -87,6 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     const res = await syncGoogleTasks(gtasksClientId.trim());
     if (res.success) {
       const parts: string[] = [];
+      if (res.completedCount && res.completedCount > 0) parts.push(`Completed ${res.completedCount} in Google Tasks`);
       if (res.pushedCount && res.pushedCount > 0) parts.push(`Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'}`);
       if (res.count > 0) parts.push(`Synced ${res.count} from Google`);
       if (res.relocatedCount && res.relocatedCount > 0) parts.push(`Relocated ${res.relocatedCount} to dedicated lists`);

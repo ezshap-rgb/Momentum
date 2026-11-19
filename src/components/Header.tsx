@@ -43,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
     layoutMode,
     toggleLayoutMode,
     isSyncingTasks,
+    pendingGoogleTaskOpsCount,
     syncGoogleTasks,
     undo,
     canUndo,
@@ -160,6 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
               const res = await syncGoogleTasks();
               if (res.success) {
                 const parts: string[] = [];
+                if (res.completedCount && res.completedCount > 0) parts.push(`✓ Synced ${res.completedCount} completed/deleted task${res.completedCount === 1 ? '' : 's'} to Google Tasks`);
                 if (res.pushedCount && res.pushedCount > 0) parts.push(`✓ Uploaded ${res.pushedCount} new task${res.pushedCount === 1 ? '' : 's'} to Google Tasks`);
                 if (res.count > 0) parts.push(`✓ Synced ${res.count} from Google`);
                 if (res.relocatedCount && res.relocatedCount > 0) parts.push(`✓ Relocated ${res.relocatedCount} to dedicated Google lists`);
@@ -168,7 +170,13 @@ export const Header: React.FC<HeaderProps> = ({
                 const listDetail = res.listsSummary ? `\nGoogle Task Lists: ${res.listsSummary}` : '';
                 const errorDetail = res.errors && res.errors.length > 0 ? `\n⚠️ Errors:\n${res.errors.join('\n')}` : '';
 
-                if (res.count === 0 && (!res.removedCount || res.removedCount === 0) && (!res.pushedCount || res.pushedCount === 0) && (!res.relocatedCount || res.relocatedCount === 0)) {
+                if (
+                  res.count === 0 &&
+                  (!res.completedCount || res.completedCount === 0) &&
+                  (!res.removedCount || res.removedCount === 0) &&
+                  (!res.pushedCount || res.pushedCount === 0) &&
+                  (!res.relocatedCount || res.relocatedCount === 0)
+                ) {
                   if (res.errors && res.errors.length > 0) {
                     alert(`Sync completed with errors:\n${accountDetail}${errorDetail}`);
                   } else {
@@ -185,12 +193,16 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             disabled={isSyncingTasks}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition shrink-0 ${
-              settings.googleTasksConnected
+              pendingGoogleTaskOpsCount > 0 && !isSyncingTasks
+                ? 'bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                : settings.googleTasksConnected
                 ? 'bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
                 : 'bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800'
             }`}
             title={
-              settings.googleTasksConnected
+              pendingGoogleTaskOpsCount > 0
+                ? `${pendingGoogleTaskOpsCount} completed/deleted task(s) waiting to sync to Google Tasks — click to sync now`
+                : settings.googleTasksConnected
                 ? 'Sync Google Tasks from your phone'
                 : 'Connect Google Tasks'
             }
@@ -199,6 +211,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-[11px] font-bold">
               {isSyncingTasks
                 ? 'Syncing...'
+                : pendingGoogleTaskOpsCount > 0
+                ? `Sync Tasks (${pendingGoogleTaskOpsCount})`
                 : settings.googleTasksConnected
                 ? 'Sync Tasks'
                 : 'Connect Tasks'}

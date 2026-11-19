@@ -1,5 +1,10 @@
 import { MomentumBoardData, QuickJob, Responsibility, JobRecurrence, Project, Habit, QuickJobDuration, DedicatedTaskLists } from '../types';
-import { getDeletedGoogleTaskIds } from './storageService';
+import {
+  getDeletedGoogleTaskIds,
+  getPendingGoogleTaskOps,
+  enqueuePendingGoogleTaskOp,
+  removePendingGoogleTaskOp,
+} from './storageService';
 
 declare global {
   interface Window {
@@ -248,8 +253,12 @@ export function formatListIdForUrl(listId: string): string {
   if (!trimmed || trimmed === '@default' || trimmed.toLowerCase() === '%40default') {
     return '@default';
   }
-  const decoded = decodeURIComponent(trimmed);
-  return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  try {
+    const decoded = decodeURIComponent(trimmed);
+    return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  } catch {
+    return encodeURIComponent(trimmed).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  }
 }
 
 /**
@@ -257,8 +266,12 @@ export function formatListIdForUrl(listId: string): string {
  */
 export function formatTaskIdForUrl(taskId: string): string {
   const trimmed = (taskId || '').trim();
-  const decoded = decodeURIComponent(trimmed);
-  return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  try {
+    const decoded = decodeURIComponent(trimmed);
+    return encodeURIComponent(decoded).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  } catch {
+    return encodeURIComponent(trimmed).replace(/%3A/gi, ':').replace(/%40/gi, '@');
+  }
 }
 
 /**
@@ -922,102 +935,234 @@ export function syncTasksIntoBoard(
   };
 }
 
+async function sendGoogleTaskMutation(
+  accessToken: string,
+  listId: string,
+  taskId: string,
+  method: 'PATCH' | 'DELETE',
+  body?: Record<string, any>,
+  treatAbsent404AsDone = true
+): Promise<boolean> {
+  const buildInit = (): RequestInit => ({
+    method,
+    headers: body
+      ? { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+      : { Authorization: `Bearer ${accessToken}` },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  try {
+    const targetList = !listId || listId === '@default' ? '@default' : listId;
+    const listPath = formatListIdForUrl(targetList);
+    const taskPath = formatTaskIdForUrl(taskId);
+    const res = await fetch(
+      `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
+      buildInit()
+    );
+
+    if (res.ok || (method === 'DELETE' && res.status === 204)) {
+      return true;
+    }
+
+    if (res.status === 401) {
+      clearStoredAccessToken();
+      console.warn(`Google Tasks OAuth expired (401) during ${method} for task ${taskId}`);
+      return false;
+    }
+
+    if (res.status === 404) {
+      let allLists: { listId: string; listTitle: string; tasks: GoogleTaskItem[] }[];
+      try {
+        allLists = await fetchAllGoogleTasks(accessToken);
+      } catch {
+        return false;
+      }
+
+      const matchingList = allLists.find(
+        (l) => l.listId !== targetList && l.tasks.some((t) => t.id === taskId)
+      );
+      if (matchingList) {
+        const altListPath = formatListIdForUrl(matchingList.listId);
+        const retryRes = await fetch(
+          `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
+          buildInit()
+        );
+        if (retryRes.ok || (method === 'DELETE' && retryRes.status === 204)) {
+          return true;
+        }
+        if (retryRes.status === 401) {
+          clearStoredAccessToken();
+        }
+        return false;
+      }
+
+      // Not present in any active list (showCompleted=false): already completed/deleted remotely
+      return treatAbsent404AsDone;
+    }
+
+    const errText = await res.text().catch(() => '');
+    console.warn(`Google Tasks ${method} failed (${res.status}) for task ${taskId}:`, errText);
+    return false;
+  } catch (e) {
+    console.warn(`Google Tasks ${method} network error for task ${taskId}:`, e);
+    return false;
+  }
+}
+
 /**
- * Mark a task completed on Google Tasks when checked off in Momentum
+ * Mark a task completed on Google Tasks when checked off in Momentum.
+ * Returns true if confirmed completed (or already absent from active lists), false if retry is needed.
  */
 export async function markGoogleTaskCompleted(
   accessToken: string,
   listId: string,
   taskId: string
-): Promise<void> {
-  try {
-    const targetList = !listId || listId === '@default' ? '@default' : listId;
-    const listPath = formatListIdForUrl(targetList);
-    const taskPath = formatTaskIdForUrl(taskId);
-    const res = await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'completed' }),
-      }
-    );
-    if (!res.ok && res.status === 404) {
-      try {
-        const allLists = await fetchAllGoogleTasks(accessToken);
-        for (const l of allLists) {
-          if (l.listId !== targetList) {
-            const altListPath = formatListIdForUrl(l.listId);
-            await fetch(
-              `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
-              {
-                method: 'PATCH',
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ status: 'completed' }),
-              }
-            );
-          }
-        }
-      } catch {}
-    }
-  } catch (e) {
-    console.warn('Failed to mark task completed on Google Tasks:', e);
-  }
+): Promise<boolean> {
+  return sendGoogleTaskMutation(accessToken, listId, taskId, 'PATCH', { status: 'completed' }, true);
 }
 
 /**
- * Permanently delete a task on Google Tasks when removed from Momentum or relocated
+ * Reopen a completed task on Google Tasks (e.g. when unchecked or undone in Momentum).
+ */
+export async function reopenGoogleTask(
+  accessToken: string,
+  listId: string,
+  taskId: string
+): Promise<boolean> {
+  return sendGoogleTaskMutation(
+    accessToken,
+    listId,
+    taskId,
+    'PATCH',
+    { status: 'needsAction', completed: null },
+    false
+  );
+}
+
+/**
+ * Permanently delete a task on Google Tasks when removed from Momentum or relocated.
+ * Returns true if confirmed deleted (or already absent from active lists), false if retry is needed.
  */
 export async function deleteGoogleTask(
   accessToken: string,
   listId: string,
   taskId: string
-): Promise<void> {
-  try {
-    const targetList = !listId || listId === '@default' ? '@default' : listId;
-    const listPath = formatListIdForUrl(targetList);
-    const taskPath = formatTaskIdForUrl(taskId);
-    const res = await fetch(
-      `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-    if (!res.ok && res.status !== 204) {
-      if (res.status === 404) {
-        try {
-          const allLists = await fetchAllGoogleTasks(accessToken);
-          for (const l of allLists) {
-            if (l.listId !== targetList) {
-              const altListPath = formatListIdForUrl(l.listId);
-              const retryRes = await fetch(
-                `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
-                {
-                  method: 'DELETE',
-                  headers: { Authorization: `Bearer ${accessToken}` },
-                }
-              );
-              if (retryRes.ok || retryRes.status === 204) break;
-            }
-          }
-        } catch {}
-      } else {
-        const errText = await res.text();
-        console.warn(`Failed to delete Google task ${taskId} from ${targetList}:`, res.status, errText);
+): Promise<boolean> {
+  return sendGoogleTaskMutation(accessToken, listId, taskId, 'DELETE', undefined, true);
+}
+
+/**
+ * Flushes pending completions/deletions and retroactively completes any active Google Tasks
+ * that are already marked done locally or recorded in momentum_deleted_gtasks_v1.
+ */
+export async function flushGoogleTaskCompletionsAndDeletions(
+  accessToken: string,
+  boardData: MomentumBoardData,
+  activeTaskLists: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[]
+): Promise<{
+  completedCount: number;
+  deletedCount: number;
+  flushedTaskIds: Set<string>;
+  errors: string[];
+}> {
+  let completedCount = 0;
+  let deletedCount = 0;
+  const flushedTaskIds = new Set<string>();
+  const errors: string[] = [];
+
+  const activeTaskMap = new Map<string, string>();
+  for (const list of activeTaskLists) {
+    for (const task of list.tasks) {
+      if (task.id && !task.deleted && task.status !== 'completed' && !task.hidden) {
+        activeTaskMap.set(task.id, list.listId);
       }
     }
-  } catch (e) {
-    console.warn('Failed to delete task from Google Tasks:', e);
   }
+
+  const opsToRun = new Map<
+    string,
+    { listId: string; action: 'complete' | 'delete'; fromPendingQueue: boolean }
+  >();
+
+  // 1. Queued pending operations
+  for (const op of getPendingGoogleTaskOps()) {
+    if (op.action === 'complete' && !activeTaskMap.has(op.taskId)) {
+      // Already completed or deleted in Google Tasks
+      removePendingGoogleTaskOp(op.taskId);
+      continue;
+    }
+    opsToRun.set(op.taskId, {
+      listId: activeTaskMap.get(op.taskId) || op.listId || '@default',
+      action: op.action,
+      fromPendingQueue: true,
+    });
+  }
+
+  // 2. Retroactive catch-up for tasks marked done before the persistent write queue existed
+  for (const deletedId of getDeletedGoogleTaskIds()) {
+    const activeListId = activeTaskMap.get(deletedId);
+    if (activeListId && !opsToRun.has(deletedId)) {
+      opsToRun.set(deletedId, {
+        listId: activeListId,
+        action: 'complete',
+        fromPendingQueue: false,
+      });
+    }
+  }
+
+  const enqueueDoneItem = (googleTaskId?: string) => {
+    if (!googleTaskId) return;
+    const activeListId = activeTaskMap.get(googleTaskId);
+    if (activeListId && !opsToRun.has(googleTaskId)) {
+      opsToRun.set(googleTaskId, {
+        listId: activeListId,
+        action: 'complete',
+        fromPendingQueue: false,
+      });
+    }
+  };
+
+  for (const j of boardData.quick_jobs) {
+    if (j.done) enqueueDoneItem(j.googleTaskId);
+  }
+  for (const r of boardData.responsibilities) {
+    if (r.status === 'done') enqueueDoneItem(r.googleTaskId);
+  }
+  for (const p of boardData.projects) {
+    if (p.status === 'completed') enqueueDoneItem(p.googleTaskId);
+  }
+
+  // 3. Execute remote updates
+  const hadStoredToken = !!getStoredAccessToken();
+  for (const [taskId, { listId, action, fromPendingQueue }] of opsToRun.entries()) {
+    const ok =
+      action === 'delete'
+        ? await deleteGoogleTask(accessToken, listId, taskId)
+        : await markGoogleTaskCompleted(accessToken, listId, taskId);
+
+    if (ok) {
+      flushedTaskIds.add(taskId);
+      if (action === 'delete') deletedCount++;
+      else completedCount++;
+
+      if (fromPendingQueue) {
+        removePendingGoogleTaskOp(taskId);
+      }
+    } else {
+      errors.push(`Failed to ${action} Google Task ${taskId} in list ${listId}`);
+      if (!fromPendingQueue) {
+        enqueuePendingGoogleTaskOp({
+          taskId,
+          listId,
+          action,
+          timestamp: Date.now(),
+        });
+      }
+      if (hadStoredToken && !getStoredAccessToken()) break;
+    }
+  }
+
+  return { completedCount, deletedCount, flushedTaskIds, errors };
 }
 
 /**
@@ -1245,21 +1390,31 @@ export async function fetchGoogleTasksFromWebhook(
   }
 }
 
+async function postWebhookTaskAction(
+  webhookUrl: string,
+  action: 'complete' | 'delete',
+  taskId: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action, taskId }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn(`Webhook ${action} failed:`, e);
+    return false;
+  }
+}
+
 /**
  * Mark a task completed via Google Apps Script Webhook Relay
  */
 export async function markGoogleTaskCompletedViaWebhook(
   webhookUrl: string,
   taskId: string
-): Promise<void> {
-  try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'complete', taskId }),
-    });
-  } catch (e) {
-    console.warn('Webhook complete failed:', e);
-  }
+): Promise<boolean> {
+  return postWebhookTaskAction(webhookUrl, 'complete', taskId);
 }
 
 /**
@@ -1268,15 +1423,8 @@ export async function markGoogleTaskCompletedViaWebhook(
 export async function deleteGoogleTaskViaWebhook(
   webhookUrl: string,
   taskId: string
-): Promise<void> {
-  try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete', taskId }),
-    });
-  } catch (e) {
-    console.warn('Webhook delete failed:', e);
-  }
+): Promise<boolean> {
+  return postWebhookTaskAction(webhookUrl, 'delete', taskId);
 }
 
 /**

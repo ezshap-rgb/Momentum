@@ -378,14 +378,15 @@ function getPartForFriction(friction) {
  * Updates last_folded_event_id and marks matching Google Task completed in Google Tasks.
  */
 function foldEventsToActions() {
+  const foldedCompletedTaskIds = new Set();
   const ss = getSpreadsheet();
   const eventsSheet = ss.getSheetByName('Events');
   const actionsSheet = ss.getSheetByName('Actions');
-  if (!eventsSheet || !actionsSheet) return;
+  if (!eventsSheet || !actionsSheet) return foldedCompletedTaskIds;
 
   const lastEventRow = eventsSheet.getLastRow();
   const lastActionRow = actionsSheet.getLastRow();
-  if (lastEventRow <= 1 || lastActionRow <= 1) return;
+  if (lastEventRow <= 1 || lastActionRow <= 1) return foldedCompletedTaskIds;
 
   // Map task_id -> row index in Actions
   const actionTaskIds = actionsSheet.getRange(2, 1, lastActionRow - 1, 1).getValues();
@@ -452,6 +453,7 @@ function foldEventsToActions() {
 
       // Complete Google Task in Google Tasks API
       markGoogleTaskCompletedById(taskId);
+      foldedCompletedTaskIds.add(taskId);
     }
   }
 
@@ -459,6 +461,8 @@ function foldEventsToActions() {
     actionsSheet.getRange(2, 1, actionsData.length, 33).setValues(actionsData);
     Logger.log('Applied events to Actions tab.');
   }
+
+  return foldedCompletedTaskIds;
 }
 
 /**
@@ -578,9 +582,16 @@ function doPost(e) {
 
       sheet.appendRow(row);
 
-      // If it's a completion event, fold immediately
+      // If it's a completion event, fold immediately and also complete directly on Google Tasks if not in Actions tab
       if (event.type === 'action_completed') {
-        foldEventsToActions();
+        const folded = foldEventsToActions();
+        let evPayload = event.payload;
+        if (typeof evPayload === 'string' && evPayload.startsWith('{')) {
+          try { evPayload = JSON.parse(evPayload); } catch (_) {}
+        }
+        if (evPayload && evPayload.task_id && !folded.has(String(evPayload.task_id))) {
+          markGoogleTaskCompletedById(String(evPayload.task_id));
+        }
       }
 
       return jsonResponse({ ok: true, message: 'Event recorded', event_id: event.event_id });
@@ -595,6 +606,7 @@ function doPost(e) {
       const rowsToAppend = [];
       const appendedIds = [];
       const skippedIds = [];
+      const newlyAppendedCompletedTaskIds = [];
       let hasCompletion = false;
 
       for (let i = 0; i < events.length; i++) {
@@ -616,7 +628,16 @@ function doPost(e) {
           ev.schema_version || '1.0'
         ]);
         appendedIds.push(strId);
-        if (ev.type === 'action_completed') hasCompletion = true;
+        if (ev.type === 'action_completed') {
+          hasCompletion = true;
+          let evPayload = ev.payload;
+          if (typeof evPayload === 'string' && evPayload.startsWith('{')) {
+            try { evPayload = JSON.parse(evPayload); } catch (_) {}
+          }
+          if (evPayload && evPayload.task_id) {
+            newlyAppendedCompletedTaskIds.push(String(evPayload.task_id));
+          }
+        }
       }
 
       if (rowsToAppend.length > 0) {
@@ -624,7 +645,13 @@ function doPost(e) {
       }
 
       if (hasCompletion) {
-        foldEventsToActions();
+        const folded = foldEventsToActions();
+        for (let k = 0; k < newlyAppendedCompletedTaskIds.length; k++) {
+          const tid = newlyAppendedCompletedTaskIds[k];
+          if (!folded.has(tid)) {
+            markGoogleTaskCompletedById(tid);
+          }
+        }
       }
 
       return jsonResponse({
