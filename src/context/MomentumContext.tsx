@@ -308,6 +308,76 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [settings]
   );
 
+  const reconcileCreatedGoogleTask = useCallback(
+    (
+      bucket: 'quick_jobs' | 'responsibilities' | 'projects',
+      localId: string,
+      taskId: string,
+      listId?: string
+    ) => {
+      if (!taskId) return;
+      const board = boardDataRef.current;
+
+      if (bucket === 'quick_jobs') {
+        const current = board.quick_jobs.find((j) => j.id === localId);
+        if (!current) {
+          dispatchGoogleTaskWrite(taskId, listId, 'delete');
+          return;
+        }
+        updateBoard((prev) => ({
+          ...prev,
+          quick_jobs: prev.quick_jobs.map((j) =>
+            j.id === localId
+              ? { ...j, googleTaskId: taskId, ...(listId ? { googleTaskListId: listId } : {}) }
+              : j
+          ),
+        }));
+        if (current.done) {
+          dispatchGoogleTaskWrite(taskId, listId, 'complete');
+        }
+        return;
+      }
+
+      if (bucket === 'responsibilities') {
+        const current = board.responsibilities.find((r) => r.id === localId);
+        if (!current) {
+          dispatchGoogleTaskWrite(taskId, listId, 'delete');
+          return;
+        }
+        updateBoard((prev) => ({
+          ...prev,
+          responsibilities: prev.responsibilities.map((r) =>
+            r.id === localId
+              ? { ...r, googleTaskId: taskId, ...(listId ? { googleTaskListId: listId } : {}) }
+              : r
+          ),
+        }));
+        if (current.status === 'done') {
+          dispatchGoogleTaskWrite(taskId, listId, 'complete');
+        }
+        return;
+      }
+
+      const current = board.projects.find((p) => p.id === localId);
+      if (!current) {
+        dispatchGoogleTaskWrite(taskId, listId, 'delete');
+        return;
+      }
+      updateBoard((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) =>
+          p.id === localId
+            ? { ...p, googleTaskId: taskId, ...(listId ? { googleTaskListId: listId } : {}) }
+            : p
+        ),
+      }));
+      if (current.status === 'completed') {
+        dispatchGoogleTaskWrite(taskId, listId, 'complete');
+      }
+    },
+    [dispatchGoogleTaskWrite, updateBoard]
+  );
+
   const undo = useCallback(() => {
     const stack = undoStackRef.current;
     if (stack.length === 0) return;
@@ -451,30 +521,28 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Background push to Google Tasks (Webhook or OAuth)
       if (settings.googleTasksWebhookUrl) {
-        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `Task: ${cleanTitle}`).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
-            }));
-          }
-        });
+        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `Task: ${cleanTitle}`)
+          .then((taskId) => {
+            if (taskId) {
+              reconcileCreatedGoogleTask('quick_jobs', jobId, taskId);
+            }
+          })
+          .catch(() => {});
       } else {
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
           const listId = settings.googleTaskListsMap?.tasksListId || settings.googleTaskListsMap?.quickJobsListId || '@default';
-          createGoogleTask(token, listId, `Task: ${cleanTitle}`).then((taskId) => {
-            if (taskId) {
-              updateBoard((prev) => ({
-                ...prev,
-                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId, googleTaskListId: listId } : j)),
-              }));
-            }
-          });
+          createGoogleTask(token, listId, `Task: ${cleanTitle}`)
+            .then((taskId) => {
+              if (taskId) {
+                reconcileCreatedGoogleTask('quick_jobs', jobId, taskId, listId);
+              }
+            })
+            .catch(() => {});
         }
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap]
+    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
   const editQuickJob = useCallback(
@@ -599,19 +667,16 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (token && settings.googleTasksConnected) {
         const listId = settings.googleTaskListsMap?.jobsListId || settings.googleTaskListsMap?.responsibilitiesListId || '@default';
         const taskTitle = `Job: ${newResp.title} -> ${newResp.steps[0]}`;
-        createGoogleTask(token, listId, taskTitle).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              responsibilities: prev.responsibilities.map((r) =>
-                r.id === newResp.id ? { ...r, googleTaskId: taskId, googleTaskListId: listId } : r
-              ),
-            }));
-          }
-        });
+        createGoogleTask(token, listId, taskTitle)
+          .then((taskId) => {
+            if (taskId) {
+              reconcileCreatedGoogleTask('responsibilities', newResp.id, taskId, listId);
+            }
+          })
+          .catch(() => {});
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
   const advanceResponsibilityStep = useCallback(
@@ -849,19 +914,16 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (token && settings.googleTasksConnected) {
         const listId = settings.googleTaskListsMap?.projectsListId || '@default';
         const taskTitle = `Project: ${newProj.name} | Next: ${newProj.next_step}`;
-        createGoogleTask(token, listId, taskTitle).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              projects: prev.projects.map((p) =>
-                p.id === newProj.id ? { ...p, googleTaskId: taskId, googleTaskListId: listId } : p
-              ),
-            }));
-          }
-        });
+        createGoogleTask(token, listId, taskTitle)
+          .then((taskId) => {
+            if (taskId) {
+              reconcileCreatedGoogleTask('projects', newProj.id, taskId, listId);
+            }
+          })
+          .catch(() => {});
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
+    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
   const updateProjectProgress = useCallback(

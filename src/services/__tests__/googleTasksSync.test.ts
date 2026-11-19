@@ -12,7 +12,9 @@ import {
   markGoogleTaskCompleted,
   deleteGoogleTask,
   flushGoogleTaskCompletionsAndDeletions,
+  syncTasksIntoBoard,
 } from '../googleTasksService';
+import { getDeletedGoogleTaskIds } from '../storageService';
 import { MomentumBoardData } from '../../types';
 
 function createMockLocalStorage() {
@@ -302,6 +304,219 @@ describe('Google Tasks Write-Back Queue & Flush Sync', () => {
 
       // Only the failed op should remain in pending storage
       expect(getPendingGoogleTaskOps().map((o) => o.taskId)).toEqual(['gt_queued_fail']);
+    });
+
+    it('matches and completes active Google Tasks by normalized title when done locally without current googleTaskId (while sparing active titles and habits)', async () => {
+      const boardData = makeEmptyBoard({
+        quick_jobs: [
+          { id: 'qj-unlinked', title: 'Buy Oat Milk', done: true, createdAt: Date.now() },
+          { id: 'qj-old-id', title: 'Email Dentist', done: true, createdAt: Date.now(), googleTaskId: 'stale_old_id' },
+          // Title collision: one done, one STILL active -> must NOT complete the Google Task by title!
+          { id: 'qj-dup-done', title: 'Call Mom', done: true, createdAt: Date.now() },
+          { id: 'qj-dup-active', title: 'Call Mom', done: false, createdAt: Date.now() },
+        ],
+        responsibilities: [
+          {
+            id: 'resp-unlinked',
+            title: 'Submit Tax Form',
+            steps: ['Sign PDF'],
+            current_step_index: 1,
+            status: 'done',
+            createdAt: Date.now(),
+          },
+        ],
+        projects: [
+          {
+            id: 'proj-unlinked',
+            name: 'Kitchen Shelf',
+            status: 'completed',
+            current_position: 'Done',
+            next_step: 'Finished',
+            last_updated: Date.now(),
+            review_interval_days: 7,
+            history: [],
+          },
+        ],
+      });
+
+      const activeTaskLists = [
+        {
+          listId: 'list_tasks',
+          listTitle: 'Tasks',
+          tasks: [
+            { id: 'gt_oat_milk', title: 'Task: Buy Oat Milk [5m]', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+            { id: 'gt_dentist', title: '[1m] Email Dentist', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+            { id: 'gt_call_mom', title: 'Task: Call Mom', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+        {
+          listId: 'list_jobs',
+          listTitle: 'Jobs',
+          tasks: [
+            { id: 'gt_tax', title: 'Job: Submit Tax Form -> Mail envelope', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+        {
+          listId: 'list_projects',
+          listTitle: 'Projects',
+          tasks: [
+            { id: 'gt_kitchen', title: 'Project: Kitchen Shelf | Next: Mount brackets', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+        {
+          listId: 'list_habits',
+          listTitle: 'Habits',
+          tasks: [
+            { id: 'gt_habit_collision', title: 'Buy Oat Milk', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+      ];
+
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await flushGoogleTaskCompletionsAndDeletions('tok_title', boardData, activeTaskLists);
+
+      expect(res.completedCount).toBe(4);
+      expect(res.flushedTaskIds).toEqual(new Set(['gt_oat_milk', 'gt_dentist', 'gt_tax', 'gt_kitchen']));
+      expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('gt_call_mom'), expect.anything());
+      expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('gt_habit_collision'), expect.anything());
+      expect(getDeletedGoogleTaskIds().has('gt_oat_milk')).toBe(true);
+      expect(getDeletedGoogleTaskIds().has('gt_tax')).toBe(true);
+    });
+  });
+
+  describe('400 Bad Request cross-list fallback & syncTasksIntoBoard pruning/Jobs detection', () => {
+    it('falls back across active lists on 400 Bad Request and completes task in its actual list', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/lists/@default/tasks/task_400') && init?.method === 'PATCH') {
+          return new Response('Invalid task ID for default list', { status: 400 });
+        }
+        if (url === 'https://tasks.googleapis.com/tasks/v1/users/@me/lists') {
+          return new Response(
+            JSON.stringify({
+              items: [
+                { id: 'list_default', title: 'My Tasks' },
+                { id: 'list_dedicated_tasks', title: 'Tasks' },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('/lists/list_default/tasks?')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        if (url.includes('/lists/list_dedicated_tasks/tasks?')) {
+          return new Response(
+            JSON.stringify({
+              items: [{ id: 'task_400', title: 'Task: Relocated item', status: 'needsAction', updated: '2026-11-19T10:00:00Z' }],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.endsWith('/lists/list_dedicated_tasks/tasks/task_400') && init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const ok = await markGoogleTaskCompleted('tok_400', '@default', 'task_400');
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://tasks.googleapis.com/tasks/v1/lists/list_dedicated_tasks/tasks/task_400',
+        expect.objectContaining({ method: 'PATCH' })
+      );
+    });
+
+    it('returns false on 400 Bad Request if the task still exists in the original targetList', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/lists/list_same/tasks/task_bad') && init?.method === 'PATCH') {
+          return new Response('Bad Request', { status: 400 });
+        }
+        if (url === 'https://tasks.googleapis.com/tasks/v1/users/@me/lists') {
+          return new Response(JSON.stringify({ items: [{ id: 'list_same', title: 'Tasks' }] }), { status: 200 });
+        }
+        if (url.includes('/lists/list_same/tasks?')) {
+          return new Response(
+            JSON.stringify({ items: [{ id: 'task_bad', title: 'Still active', status: 'needsAction', updated: '2026-11-19T10:00:00Z' }] }),
+            { status: 200 }
+          );
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      expect(await markGoogleTaskCompleted('tok_same', 'list_same', 'task_bad')).toBe(false);
+    });
+
+    it('prunes recent done/deleted tasks inside the 30-min grace period, skips relocating done tasks, and routes "Jobs" list items to responsibilities', () => {
+      const now = Date.now();
+      recordDeletedGoogleTaskId('gt_deleted_recent');
+
+      const boardData = makeEmptyBoard({
+        quick_jobs: [
+          { id: 'qj-recent-done', title: 'Done Within Grace', done: true, createdAt: now, googleTaskId: 'gt_recent_done' },
+          { id: 'qj-deleted-recent', title: 'Deleted Within Grace', done: false, createdAt: now, googleTaskId: 'gt_deleted_recent' },
+          { id: 'qj-active-keep', title: 'Keep Active Task', done: false, createdAt: now, googleTaskId: 'gt_active_keep' },
+        ],
+        responsibilities: [
+          { id: 'resp-recent-done', title: 'Done Job Recent', steps: ['S1'], current_step_index: 1, status: 'done', createdAt: now, googleTaskId: 'gt_resp_done' },
+        ],
+        projects: [
+          { id: 'proj-done-reloc', name: 'Done Proj', status: 'completed', current_position: 'Done', next_step: 'None', last_updated: now, review_interval_days: 7, history: [] },
+        ],
+      });
+
+      const taskLists = [
+        {
+          listId: 'default_list',
+          listTitle: 'My Tasks',
+          tasks: [
+            // Done locally, sitting in wrong list — must NOT be relocated or re-added
+            { id: 'gt_recent_done', title: 'Task: Done Within Grace', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+            // Completed project sitting in wrong list — must NOT be relocated
+            { id: 'gt_proj_done_wrong_list', title: 'Project: Done Proj | Next: None', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+        {
+          listId: 'tasks_list',
+          listTitle: 'Tasks',
+          tasks: [
+            { id: 'gt_active_keep', title: 'Task: Keep Active Task', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+        {
+          listId: 'jobs_list',
+          listTitle: 'Jobs',
+          tasks: [
+            { id: 'gt_job_untagged', title: 'Renew Passport -> Find photo', status: 'needsAction' as const, updated: '2026-11-19T10:00:00Z' },
+          ],
+        },
+      ];
+
+      const dedicatedLists = {
+        tasksListId: 'tasks_list',
+        quickJobsListId: 'tasks_list',
+        jobsListId: 'jobs_list',
+        responsibilitiesListId: 'jobs_list',
+        projectsListId: 'projects_list',
+        habitsListId: 'habits_list',
+      };
+
+      const res = syncTasksIntoBoard(boardData, taskLists, false, undefined, dedicatedLists);
+
+      // Done and deleted recent items are pruned despite createdAt === now
+      expect(res.updatedBoard.quick_jobs.map((j) => j.id)).toEqual(['qj-active-keep']);
+      // Untagged item from "Jobs" list was routed to responsibilities, NOT quick_jobs, and NOT relocated
+      expect(res.updatedBoard.responsibilities.map((r) => r.title)).toEqual(['Renew Passport']);
+      expect(res.tasksToRelocate).toBeUndefined();
+      expect(res.removedTasks).toBe(3);
     });
   });
 });

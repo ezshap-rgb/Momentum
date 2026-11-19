@@ -1,6 +1,7 @@
 import { MomentumBoardData, QuickJob, Responsibility, JobRecurrence, Project, Habit, QuickJobDuration, DedicatedTaskLists } from '../types';
 import {
   getDeletedGoogleTaskIds,
+  recordDeletedGoogleTaskId,
   getPendingGoogleTaskOps,
   enqueuePendingGoogleTaskOp,
   removePendingGoogleTaskOp,
@@ -419,6 +420,81 @@ export function normalizeHabitName(name: string): string {
     .trim();
 }
 
+function normalizeGoogleTaskTitleForMatch(rawTitle: string): string {
+  const beforeDelimiter = (rawTitle || '').split('|')[0].split('->')[0];
+  return beforeDelimiter
+    .replace(/\[(?:1m|5m|15m|30m|1h|\d+m)\]/gi, ' ')
+    .trim()
+    .replace(/^(?:habit|daily|routine|project|proj|resp|responsibility|bigger\s*job|job|bigger|quick|task)(?::|\s+-)\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function collectLocalCompletionState(boardData: MomentumBoardData): {
+  activeLocalIds: Set<string>;
+  activeLocalTitles: Set<string>;
+  completedLocalIds: Set<string>;
+  completedLocalTitles: Set<string>;
+} {
+  const activeLocalIds = new Set<string>();
+  const activeLocalTitles = new Set<string>();
+  const completedLocalIds = new Set<string>();
+
+  for (const j of boardData.quick_jobs) {
+    if (!j.done) {
+      if (j.googleTaskId) activeLocalIds.add(j.googleTaskId);
+      const norm = normalizeGoogleTaskTitleForMatch(j.title);
+      if (norm) activeLocalTitles.add(norm);
+    } else if (j.googleTaskId) {
+      completedLocalIds.add(j.googleTaskId);
+    }
+  }
+
+  for (const r of boardData.responsibilities) {
+    if (r.status === 'active') {
+      if (r.googleTaskId) activeLocalIds.add(r.googleTaskId);
+      const norm = normalizeGoogleTaskTitleForMatch(r.title);
+      if (norm) activeLocalTitles.add(norm);
+    } else if (r.status === 'done' && r.googleTaskId) {
+      completedLocalIds.add(r.googleTaskId);
+    }
+  }
+
+  for (const p of boardData.projects) {
+    if (p.status !== 'completed') {
+      if (p.googleTaskId) activeLocalIds.add(p.googleTaskId);
+      const norm = normalizeGoogleTaskTitleForMatch(p.name);
+      if (norm) activeLocalTitles.add(norm);
+    } else if (p.googleTaskId) {
+      completedLocalIds.add(p.googleTaskId);
+    }
+  }
+
+  for (const h of boardData.habits) {
+    if (h.googleTaskId) activeLocalIds.add(h.googleTaskId);
+  }
+
+  const completedLocalTitles = new Set<string>();
+  for (const j of boardData.quick_jobs) {
+    if (!j.done) continue;
+    const norm = normalizeGoogleTaskTitleForMatch(j.title);
+    if (norm && !activeLocalTitles.has(norm)) completedLocalTitles.add(norm);
+  }
+  for (const r of boardData.responsibilities) {
+    if (r.status !== 'done') continue;
+    const norm = normalizeGoogleTaskTitleForMatch(r.title);
+    if (norm && !activeLocalTitles.has(norm)) completedLocalTitles.add(norm);
+  }
+  for (const p of boardData.projects) {
+    if (p.status !== 'completed') continue;
+    const norm = normalizeGoogleTaskTitleForMatch(p.name);
+    if (norm && !activeLocalTitles.has(norm)) completedLocalTitles.add(norm);
+  }
+
+  return { activeLocalIds, activeLocalTitles, completedLocalIds, completedLocalTitles };
+}
+
 /**
  * Intelligent parser & two-way synchronizer that:
  * 1. Prunes tasks that were deleted or completed in Google Tasks.
@@ -461,8 +537,9 @@ export function syncTasksIntoBoard(
     }
   }
 
-  // Load deleted IDs so completed / deleted tasks are NEVER resurrected
+  // Load deleted IDs and locally completed state so completed/deleted tasks are NEVER resurrected
   const deletedTaskIds = getDeletedGoogleTaskIds();
+  const { activeLocalIds, completedLocalIds, completedLocalTitles } = collectLocalCompletionState(boardData);
 
   // 30-minute grace period: tasks created or updated within 30 minutes are protected from remote pruning
   const GRACE_PERIOD_MS = 30 * 60 * 1000;
@@ -477,17 +554,17 @@ export function syncTasksIntoBoard(
   };
 
   // 2. TWO-WAY PRUNING:
-  // If a task was linked to Google Tasks (or cleanOrphanedDemoTasks is on) and no longer exists in Google Tasks, remove it!
+  // If a task was marked done/deleted in Momentum or is missing remotely, remove it!
   const quickJobs = boardData.quick_jobs.filter((j) => {
-    // If protected by grace period or just pushed, ALWAYS preserve
-    if (isProtectedFromPruning(j.createdAt, j.googleTaskId)) {
-      return true;
-    }
-
-    // If marked deleted/completed by user in Momentum, prune it
-    if (j.googleTaskId && deletedTaskIds.has(j.googleTaskId)) {
+    // Check local completion/deletion BEFORE grace period so done/deleted tasks don't linger
+    if (j.done || (j.googleTaskId && deletedTaskIds.has(j.googleTaskId))) {
       removedTasks++;
       return false;
+    }
+
+    // If protected by grace period or just pushed, preserve active tasks
+    if (isProtectedFromPruning(j.createdAt, j.googleTaskId)) {
+      return true;
     }
 
     // If linked to Google Tasks and missing from active Google Tasks (and outside grace period), prune it
@@ -513,13 +590,13 @@ export function syncTasksIntoBoard(
   });
 
   const responsibilities = boardData.responsibilities.filter((r) => {
-    if (isProtectedFromPruning(r.createdAt, r.googleTaskId)) {
-      return true;
-    }
-
-    if (r.googleTaskId && deletedTaskIds.has(r.googleTaskId)) {
+    if (r.status === 'done' || (r.googleTaskId && deletedTaskIds.has(r.googleTaskId))) {
       removedTasks++;
       return false;
+    }
+
+    if (isProtectedFromPruning(r.createdAt, r.googleTaskId)) {
+      return true;
     }
 
     if (r.googleTaskId && !activeGoogleTasks.has(r.googleTaskId)) {
@@ -544,13 +621,13 @@ export function syncTasksIntoBoard(
   });
 
   const projects = boardData.projects.filter((p) => {
-    if (isProtectedFromPruning(p.last_updated, p.googleTaskId)) {
-      return true;
-    }
-
     if (p.googleTaskId && deletedTaskIds.has(p.googleTaskId)) {
       removedTasks++;
       return false;
+    }
+
+    if (isProtectedFromPruning(p.last_updated, p.googleTaskId)) {
+      return true;
     }
 
     if (p.googleTaskId && !activeGoogleTasks.has(p.googleTaskId)) {
@@ -578,16 +655,12 @@ export function syncTasksIntoBoard(
   // They are never pruned when their Google Tasks are completed.
   const habits = [...boardData.habits];
 
-  // Helper set of existing task titles and googleTaskIds to avoid duplicates
-  const existingJobKeys = new Set(quickJobs.map((j) => j.googleTaskId || j.title.toLowerCase().trim()));
-  const existingRespKeys = new Set(responsibilities.map((r) => r.googleTaskId || r.title.toLowerCase().trim()));
-  const existingProjKeys = new Set(projects.map((p) => p.googleTaskId || p.name.toLowerCase().trim()));
-  const existingHabitKeys = new Set(habits.map((h) => h.googleTaskId || h.name.toLowerCase().trim()));
-
   for (const { listId, listTitle, tasks } of taskLists) {
     const listName = listTitle || '';
     const isProjectList = /project/i.test(listName);
-    const isRespList = /resp|bigger/i.test(listName);
+    const isRespList =
+      /^(?:jobs?|responsibilit(?:y|ies)|bigger\s*jobs?)$/i.test(listName.trim()) ||
+      /resp|bigger/i.test(listName);
     const isHabitList = /habit/i.test(listName);
 
     for (const task of tasks) {
@@ -596,8 +669,12 @@ export function syncTasksIntoBoard(
 
       const taskId = task.id;
 
-      // Skip anything explicitly deleted by ID
+      // Skip anything explicitly deleted by ID or completed locally
       if (taskId && deletedTaskIds.has(taskId)) continue;
+      if (taskId && completedLocalIds.has(taskId)) {
+        recordDeletedGoogleTaskId(taskId);
+        continue;
+      }
 
       const noteSteps = parseStepsFromNotes(task.notes);
 
@@ -618,6 +695,19 @@ export function syncTasksIntoBoard(
         // Clean any leading "Task: " or "Task " if present
         cleanTitle = cleanTitle.replace(/^task(?::|\s+-|\s+)\s*/i, '').trim();
 
+        const normCleanTitle = normalizeGoogleTaskTitleForMatch(cleanTitle);
+        const existing = quickJobs.find(
+          (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanTitle.toLowerCase()
+        );
+
+        if (
+          (existing && existing.done) ||
+          (!existing && !(taskId && activeLocalIds.has(taskId)) && normCleanTitle && completedLocalTitles.has(normCleanTitle))
+        ) {
+          if (taskId) recordDeletedGoogleTaskId(taskId);
+          continue;
+        }
+
         // Relocate if sitting in main list or another list
         const targetTasksListId = dedicatedLists?.tasksListId || dedicatedLists?.quickJobsListId;
         if (targetTasksListId && listId !== targetTasksListId) {
@@ -630,10 +720,6 @@ export function syncTasksIntoBoard(
             notes: task.notes,
           });
         }
-
-        const existing = quickJobs.find(
-          (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanTitle.toLowerCase()
-        );
 
         if (!existing) {
           quickJobs.unshift({
@@ -654,7 +740,7 @@ export function syncTasksIntoBoard(
         continue;
       }
 
-      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ...", "Responsibility: ...", "Bigger: ..." OR located in a Responsibilities list)
+      // 2. BIGGER RESPONSIBILITIES (Tagged "Resp: ...", "Responsibility: ...", "Bigger: ..." OR located in a Responsibilities/Jobs list)
       if (respMatch || (isRespList && !projMatch && !habitMatch)) {
         const fullContent = respMatch ? respMatch[1].trim() : rawTitle;
         let respTitle = fullContent;
@@ -670,7 +756,7 @@ export function syncTasksIntoBoard(
         let recurrence: JobRecurrence | null = null;
         let recurrenceDay: string | null = null;
         let scheduledTime: string | null = null;
-        let scheduledDate: string | null = task.due ? task.due.split('T')[0] : null;
+        const scheduledDate: string | null = task.due ? task.due.split('T')[0] : null;
 
         const recMatch = respTitle.match(/\[(?:(weekly|daily|biweekly|monthly)\s*)?(?:(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*)?(?:(\d{1,2}:\d{2}(?:\s*[ap]m)?))?\]/i);
         if (recMatch && (recMatch[1] || recMatch[2] || recMatch[3])) {
@@ -681,6 +767,19 @@ export function syncTasksIntoBoard(
           }
           if (recMatch[3]) scheduledTime = recMatch[3];
           respTitle = respTitle.replace(recMatch[0], '').trim();
+        }
+
+        const normRespTitle = normalizeGoogleTaskTitleForMatch(respTitle);
+        const existing = responsibilities.find(
+          (r) => (taskId && r.googleTaskId === taskId) || r.title.toLowerCase().trim() === respTitle.toLowerCase()
+        );
+
+        if (
+          (existing && existing.status === 'done') ||
+          (!existing && !(taskId && activeLocalIds.has(taskId)) && normRespTitle && completedLocalTitles.has(normRespTitle))
+        ) {
+          if (taskId) recordDeletedGoogleTaskId(taskId);
+          continue;
         }
 
         // Relocate if sitting in main list or another list
@@ -712,8 +811,7 @@ export function syncTasksIntoBoard(
           allSteps = ['Step 1: First physical action'];
         }
 
-        const key = taskId || respTitle.toLowerCase();
-        if (!existingRespKeys.has(key)) {
+        if (!existing) {
           const computedDue = recurrence
             ? `🔁 ${recurrenceDay || 'Weekly'}${scheduledTime ? ` ${scheduledTime}` : ''} (Resets weekly)`
             : task.due ? task.due.split('T')[0] : null;
@@ -733,15 +831,11 @@ export function syncTasksIntoBoard(
             recurrence,
             recurrenceDay,
           });
-          existingRespKeys.add(key);
           addedResponsibilities++;
         } else {
-          const existing = responsibilities.find((r) => r.googleTaskId === taskId || r.title.toLowerCase().trim() === respTitle.toLowerCase());
-          if (existing) {
-            existing.googleTaskId = taskId;
-            existing.googleTaskListId = listId;
-            if (task.due) existing.due = task.due.split('T')[0];
-          }
+          existing.googleTaskId = taskId;
+          existing.googleTaskListId = listId;
+          if (task.due) existing.due = task.due.split('T')[0];
         }
         continue;
       }
@@ -808,6 +902,19 @@ export function syncTasksIntoBoard(
           }
         }
 
+        const normProjName = normalizeGoogleTaskTitleForMatch(projName);
+        const existing = projects.find(
+          (p) => (taskId && p.googleTaskId === taskId) || p.name.toLowerCase().trim() === projName.toLowerCase()
+        );
+
+        if (
+          (existing && existing.status === 'completed') ||
+          (!existing && !(taskId && activeLocalIds.has(taskId)) && normProjName && completedLocalTitles.has(normProjName))
+        ) {
+          if (taskId) recordDeletedGoogleTaskId(taskId);
+          continue;
+        }
+
         // Relocate if sitting in main list or another list
         if (dedicatedLists?.projectsListId && listId !== dedicatedLists.projectsListId) {
           tasksToRelocate.push({
@@ -844,8 +951,7 @@ export function syncTasksIntoBoard(
           }
         }
 
-        const key = taskId || projName.toLowerCase();
-        if (!existingProjKeys.has(key)) {
+        if (!existing) {
           projects.push({
             id: `gt-proj-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             name: projName,
@@ -865,20 +971,29 @@ export function syncTasksIntoBoard(
             googleTaskId: taskId,
             googleTaskListId: listId,
           });
-          existingProjKeys.add(key);
           addedProjects++;
         } else {
-          const existing = projects.find((p) => p.googleTaskId === taskId || p.name.toLowerCase().trim() === projName.toLowerCase());
-          if (existing) {
-            existing.googleTaskId = taskId;
-            existing.googleTaskListId = listId;
-          }
+          existing.googleTaskId = taskId;
+          existing.googleTaskListId = listId;
         }
         continue;
       }
 
       // 5. UNTAGGED REGULAR TASK: Route to Tasks so ADHD user never loses a task
-      let cleanGenericTitle = rawTitle.replace(timingRegex, ' ').trim();
+      const cleanGenericTitle = rawTitle.replace(timingRegex, ' ').trim();
+      const normGenericTitle = normalizeGoogleTaskTitleForMatch(cleanGenericTitle);
+
+      const existing = quickJobs.find(
+        (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase()
+      );
+
+      if (
+        (existing && existing.done) ||
+        (!existing && !(taskId && activeLocalIds.has(taskId)) && normGenericTitle && completedLocalTitles.has(normGenericTitle))
+      ) {
+        if (taskId) recordDeletedGoogleTaskId(taskId);
+        continue;
+      }
 
       const targetTasksListId = dedicatedLists?.tasksListId || dedicatedLists?.quickJobsListId;
       if (targetTasksListId && listId !== targetTasksListId) {
@@ -891,10 +1006,6 @@ export function syncTasksIntoBoard(
           notes: task.notes,
         });
       }
-
-      const existing = quickJobs.find(
-        (j) => (taskId && j.googleTaskId === taskId) || j.title.toLowerCase().trim() === cleanGenericTitle.toLowerCase()
-      );
 
       if (!existing) {
         quickJobs.unshift({
@@ -970,7 +1081,7 @@ async function sendGoogleTaskMutation(
       return false;
     }
 
-    if (res.status === 404) {
+    if (res.status === 404 || res.status === 400) {
       let allLists: { listId: string; listTitle: string; tasks: GoogleTaskItem[] }[];
       try {
         allLists = await fetchAllGoogleTasks(accessToken);
@@ -993,6 +1104,13 @@ async function sendGoogleTaskMutation(
         if (retryRes.status === 401) {
           clearStoredAccessToken();
         }
+        return false;
+      }
+
+      const stillInTargetList = allLists.some(
+        (l) => l.listId === targetList && l.tasks.some((t) => t.id === taskId)
+      );
+      if (stillInTargetList) {
         return false;
       }
 
@@ -1098,19 +1216,9 @@ export async function flushGoogleTaskCompletionsAndDeletions(
     });
   }
 
-  // 2. Retroactive catch-up for tasks marked done before the persistent write queue existed
-  for (const deletedId of getDeletedGoogleTaskIds()) {
-    const activeListId = activeTaskMap.get(deletedId);
-    if (activeListId && !opsToRun.has(deletedId)) {
-      opsToRun.set(deletedId, {
-        listId: activeListId,
-        action: 'complete',
-        fromPendingQueue: false,
-      });
-    }
-  }
+  const { activeLocalIds, completedLocalIds, completedLocalTitles } = collectLocalCompletionState(boardData);
 
-  const enqueueDoneItem = (googleTaskId?: string) => {
+  const enqueueCompleteIfActive = (googleTaskId?: string) => {
     if (!googleTaskId) return;
     const activeListId = activeTaskMap.get(googleTaskId);
     if (activeListId && !opsToRun.has(googleTaskId)) {
@@ -1122,14 +1230,39 @@ export async function flushGoogleTaskCompletionsAndDeletions(
     }
   };
 
-  for (const j of boardData.quick_jobs) {
-    if (j.done) enqueueDoneItem(j.googleTaskId);
+  // 2. Retroactive catch-up for tasks marked done before the persistent write queue existed or by ID
+  for (const deletedId of getDeletedGoogleTaskIds()) {
+    enqueueCompleteIfActive(deletedId);
   }
-  for (const r of boardData.responsibilities) {
-    if (r.status === 'done') enqueueDoneItem(r.googleTaskId);
+  for (const doneId of completedLocalIds) {
+    enqueueCompleteIfActive(doneId);
   }
-  for (const p of boardData.projects) {
-    if (p.status === 'completed') enqueueDoneItem(p.googleTaskId);
+
+  // 2b. Title-based fallback for locally done items that have no googleTaskId or an outdated ID
+  if (completedLocalTitles.size > 0) {
+    for (const list of activeTaskLists) {
+      const isHabitList = /habit/i.test(list.listTitle || '');
+      if (isHabitList) continue;
+
+      for (const task of list.tasks) {
+        if (!task.id || task.deleted || task.status === 'completed' || task.hidden) continue;
+        if (activeLocalIds.has(task.id)) continue;
+        const trimmedTitle = (task.title || '').trim();
+        if (/^habit(?::|\s+-)/i.test(trimmedTitle)) continue;
+
+        const normTaskTitle = normalizeGoogleTaskTitleForMatch(trimmedTitle);
+        if (!normTaskTitle || !completedLocalTitles.has(normTaskTitle)) continue;
+
+        recordDeletedGoogleTaskId(task.id);
+        if (!opsToRun.has(task.id)) {
+          opsToRun.set(task.id, {
+            listId: list.listId,
+            action: 'complete',
+            fromPendingQueue: false,
+          });
+        }
+      }
+    }
   }
 
   // 3. Execute remote updates
