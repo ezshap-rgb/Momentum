@@ -521,14 +521,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Background push to Google Tasks (Webhook or OAuth)
       if (settings.googleTasksWebhookUrl) {
-        createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `Task: ${cleanTitle}`).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId } : j)),
-            }));
-          }
-        });
         createGoogleTaskViaWebhook(settings.googleTasksWebhookUrl, `Task: ${cleanTitle}`)
           .then((taskId) => {
             if (taskId) {
@@ -540,14 +532,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const token = getStoredAccessToken();
         if (token && settings.googleTasksConnected) {
           const listId = settings.googleTaskListsMap?.tasksListId || settings.googleTaskListsMap?.quickJobsListId || '@default';
-          createGoogleTask(token, listId, `Task: ${cleanTitle}`).then((taskId) => {
-            if (taskId) {
-              updateBoard((prev) => ({
-                ...prev,
-                quick_jobs: prev.quick_jobs.map((j) => (j.id === jobId ? { ...j, googleTaskId: taskId, googleTaskListId: listId } : j)),
-              }));
-            }
-          });
           createGoogleTask(token, listId, `Task: ${cleanTitle}`)
             .then((taskId) => {
               if (taskId) {
@@ -558,7 +542,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap]
     [updateBoard, settings.googleTasksConnected, settings.googleTasksWebhookUrl, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
@@ -684,16 +667,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (token && settings.googleTasksConnected) {
         const listId = settings.googleTaskListsMap?.jobsListId || settings.googleTaskListsMap?.responsibilitiesListId || '@default';
         const taskTitle = `Job: ${newResp.title} -> ${newResp.steps[0]}`;
-        createGoogleTask(token, listId, taskTitle).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              responsibilities: prev.responsibilities.map((r) =>
-                r.id === newResp.id ? { ...r, googleTaskId: taskId, googleTaskListId: listId } : r
-              ),
-            }));
-          }
-        });
         createGoogleTask(token, listId, taskTitle)
           .then((taskId) => {
             if (taskId) {
@@ -703,7 +676,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           .catch(() => {});
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
     [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
@@ -942,16 +914,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (token && settings.googleTasksConnected) {
         const listId = settings.googleTaskListsMap?.projectsListId || '@default';
         const taskTitle = `Project: ${newProj.name} | Next: ${newProj.next_step}`;
-        createGoogleTask(token, listId, taskTitle).then((taskId) => {
-          if (taskId) {
-            updateBoard((prev) => ({
-              ...prev,
-              projects: prev.projects.map((p) =>
-                p.id === newProj.id ? { ...p, googleTaskId: taskId, googleTaskListId: listId } : p
-              ),
-            }));
-          }
-        });
         createGoogleTask(token, listId, taskTitle)
           .then((taskId) => {
             if (taskId) {
@@ -961,7 +923,6 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           .catch(() => {});
       }
     },
-    [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap]
     [updateBoard, settings.googleTasksConnected, settings.googleTaskListsMap, reconcileCreatedGoogleTask]
   );
 
