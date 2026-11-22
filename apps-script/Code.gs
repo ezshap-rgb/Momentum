@@ -488,7 +488,7 @@ function findGoogleTaskByIdOrTitle_(listId, taskId, fallbackTitle) {
   if (taskId) {
     try {
       const task = Tasks.Tasks.get(listId, taskId);
-      if (task && !task.deleted) {
+      if (task && !task.deleted && !/^habit(?::|\s+-)/i.test(String(task.title || '').trim())) {
         return task;
       }
     } catch (_) {
@@ -505,6 +505,7 @@ function findGoogleTaskByIdOrTitle_(listId, taskId, fallbackTitle) {
     for (let i = 0; i < items.length; i++) {
       const t = items[i];
       if (!t || t.deleted || t.status === 'completed' || t.hidden) continue;
+      if (/^habit(?::|\s+-)/i.test(String(t.title || '').trim())) continue;
       if (normalizeTaskTitleForMatch_(t.title) === normTarget) {
         return t;
       }
@@ -516,13 +517,14 @@ function findGoogleTaskByIdOrTitle_(listId, taskId, fallbackTitle) {
 }
 
 /**
- * Completes a task in Google Tasks by its ID or fallback normalized title across all lists
+ * Completes a task in Google Tasks by its ID or fallback normalized title across non-habit lists
  */
 function markGoogleTaskCompletedById(taskId, fallbackTitle) {
   try {
     const taskLists = Tasks.Tasklists.list();
     if (!taskLists.items) return;
     for (const list of taskLists.items) {
+      if (/habit/i.test(list.title || '')) continue;
       const task = findGoogleTaskByIdOrTitle_(list.id, taskId, fallbackTitle);
       if (task && task.id) {
         task.status = 'completed';
@@ -537,13 +539,14 @@ function markGoogleTaskCompletedById(taskId, fallbackTitle) {
 }
 
 /**
- * Deletes a task in Google Tasks by its ID or fallback normalized title across all lists
+ * Deletes a task in Google Tasks by its ID or fallback normalized title across non-habit lists
  */
 function deleteGoogleTaskById(taskId, fallbackTitle) {
   try {
     const taskLists = Tasks.Tasklists.list();
     if (!taskLists.items) return;
     for (const list of taskLists.items) {
+      if (/habit/i.test(list.title || '')) continue;
       const task = findGoogleTaskByIdOrTitle_(list.id, taskId, fallbackTitle);
       if (task && task.id) {
         Tasks.Tasks.remove(list.id, task.id);

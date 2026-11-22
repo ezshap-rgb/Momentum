@@ -12,10 +12,17 @@ import {
   markGoogleTaskCompleted,
   deleteGoogleTask,
   flushGoogleTaskCompletionsAndDeletions,
+  pushLocalTasksToGoogle,
   syncTasksIntoBoard,
   makeTitleFallbackOpId,
 } from '../googleTasksService';
 import { getDeletedGoogleTaskIds } from '../storageService';
+import {
+  syncHabitsWithBoardData,
+  creditHabitFromIgnition,
+  formatLocalDateString,
+  getTodayDateString,
+} from '../focusHabits';
 import { MomentumBoardData } from '../../types';
 
 function createMockLocalStorage() {
@@ -708,6 +715,132 @@ describe('Google Tasks Write-Back Queue & Flush Sync', () => {
         'qj-local-pushed',
       ]);
       expect(res.removedTasks).toBe(1);
+    });
+  });
+
+  describe('Static Google Tasks Habits & Daily DO Refresh', () => {
+    it('pushLocalTasksToGoogle never creates new tasks in Google Tasks for habits while pushing quick tasks', async () => {
+      const boardData = makeEmptyBoard({
+        quick_jobs: [
+          { id: 'qj-new', title: 'Buy Oat Milk', done: false, createdAt: Date.now() },
+        ],
+        habits: [
+          {
+            id: 'hab-am',
+            name: 'Push-ups 50 (mrng)',
+            type: 'boolean',
+            target: 50,
+            next_due: 'Daily Morning',
+            log: {},
+          },
+          {
+            id: 'hab-custom',
+            name: 'Stretch 10',
+            type: 'boolean',
+            target: 10,
+            next_due: 'Daily Night',
+            log: {},
+          },
+        ],
+      });
+
+      const createdCalls: Array<{ url: string; title: string }> = [];
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        createdCalls.push({ url, title: body.title });
+        return new Response(JSON.stringify({ id: 'gt_created_qj' }), { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await pushLocalTasksToGoogle('tok_push', boardData, {
+        tasksListId: 'tasks_list',
+        quickJobsListId: 'tasks_list',
+        jobsListId: 'jobs_list',
+        responsibilitiesListId: 'jobs_list',
+        projectsListId: 'projects_list',
+        habitsListId: 'habits_list',
+      });
+
+      expect(res.pushedCount).toBe(1);
+      expect(createdCalls).toEqual([
+        {
+          url: 'https://tasks.googleapis.com/tasks/v1/lists/tasks_list/tasks',
+          title: 'Task: Buy Oat Milk',
+        },
+      ]);
+    });
+
+    it('flushGoogleTaskCompletionsAndDeletions never marks Habits list tasks completed', async () => {
+      recordDeletedGoogleTaskId('gt_hab_pushups_am');
+      enqueuePendingGoogleTaskOp({
+        taskId: 'gt_hab_pushups_am',
+        listId: 'habits_list',
+        action: 'complete',
+        timestamp: 100,
+        itemType: 'habit',
+      });
+
+      const boardData = makeEmptyBoard();
+      const activeTaskLists = [
+        {
+          listId: 'habits_list',
+          listTitle: 'Habits',
+          tasks: [
+            {
+              id: 'gt_hab_pushups_am',
+              title: 'Habit: Push-ups 50 (mrng)',
+              status: 'needsAction' as const,
+              updated: '2026-11-23T00:00:00Z',
+            },
+          ],
+        },
+      ];
+
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await flushGoogleTaskCompletionsAndDeletions('tok_hab_guard', boardData, activeTaskLists);
+
+      expect(res.completedCount).toBe(0);
+      expect(res.deletedCount).toBe(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getPendingGoogleTaskOps()).toEqual([]);
+    });
+
+    it('syncHabitsWithBoardData refreshes yesterday logs cleanly today and creditHabitFromIgnition keeps Morning & Evening Push-ups distinct', () => {
+      const yesterdayDate = new Date();
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterdayStr = formatLocalDateString(yesterdayDate);
+      const todayStr = getTodayDateString();
+
+      const boardHabits = [
+        {
+          id: 'hab-am',
+          name: 'Push-ups 50 (mrng)',
+          target: 50,
+          next_due: 'Daily Morning',
+          log: { [yesterdayStr]: true },
+        },
+        {
+          id: 'hab-pm',
+          name: 'Push-ups 50 (nt)',
+          target: 50,
+          next_due: 'Daily Night',
+          log: { [yesterdayStr]: true },
+        },
+      ];
+
+      const refreshed = syncHabitsWithBoardData(boardHabits);
+      expect(refreshed).toHaveLength(2);
+      expect(refreshed.find((h) => h.habit_id === 'hab-am')?.isComplete).toBe(false);
+      expect(refreshed.find((h) => h.habit_id === 'hab-pm')?.isComplete).toBe(false);
+      expect(boardHabits[0].log[yesterdayStr]).toBe(true);
+      expect(boardHabits[0].log[todayStr]).toBeUndefined();
+
+      const { updated, isAllClear } = creditHabitFromIgnition('Push-ups 50 (mrng)', 50, 'hab-am');
+      expect(isAllClear).toBe(false);
+      expect(updated.find((h) => h.habit_id === 'hab-am')?.isComplete).toBe(true);
+      expect(updated.find((h) => h.habit_id === 'hab-pm')?.isComplete).toBe(false);
     });
   });
 });

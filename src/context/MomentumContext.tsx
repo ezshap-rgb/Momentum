@@ -54,6 +54,7 @@ import {
   GoogleTaskItemType,
 } from '../services/googleTasksService';
 import { getStoredCredentials, queueEvent } from '../services/focusDataLayer';
+import { getTodayDateString } from '../services/focusHabits';
 
 interface MomentumContextType {
   boardData: MomentumBoardData;
@@ -1328,7 +1329,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Apply parsed Gemini extraction
   const applyGeminiParsedData = useCallback(
     (data: GeminiParsedData) => {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getTodayDateString();
 
       updateBoard((prev) => {
         let updatedQuickJobs = [...prev.quick_jobs];

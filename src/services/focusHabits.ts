@@ -54,8 +54,15 @@ const STORAGE_KEYS = {
   LAST_RESERVE_DATE: 'focus_last_reserve_date',
 };
 
+export function formatLocalDateString(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0];
+  return formatLocalDateString(new Date());
 }
 
 export function loadHabitsState(): HabitItem[] {
@@ -190,44 +197,23 @@ export function syncHabitsWithBoardData(
   boardHabits?: Array<{ id: string; name: string; target?: number; next_due?: string | null; log?: Record<string, any> }>
 ): HabitItem[] {
   const today = getTodayDateString();
-  let currentHabits = loadHabitsState();
 
   if (boardHabits && boardHabits.length > 0) {
-    const updated = [...currentHabits];
-    for (const bh of boardHabits) {
-      const bhLower = bh.name.toLowerCase();
-      const isDoneToday = !!(bh.log && bh.log[today]);
-
-      const existingIdx = updated.findIndex(
-        (h) =>
-          h.habit_id === bh.id ||
-          h.name.toLowerCase() === bhLower ||
-          bhLower.includes(h.name.toLowerCase()) ||
-          h.name.toLowerCase().includes(bhLower)
+    const updated = boardHabits.map((bh) => {
+      const todayVal = bh.log ? bh.log[today] : undefined;
+      const isDoneToday = Boolean(
+        typeof todayVal === 'number' ? todayVal > 0 : todayVal
       );
-
-      const parsed = parseHabitToHabitItem(bh, isDoneToday);
-      if (existingIdx >= 0) {
-        // ALWAYS update name, schedule, circuit, and quota from the habit editor!
-        updated[existingIdx] = {
-          ...updated[existingIdx],
-          name: parsed.name,
-          quota: parsed.quota,
-          unit: parsed.unit,
-          circuit: parsed.circuit,
-          schedule: parsed.schedule,
-          isComplete: isDoneToday ? true : updated[existingIdx].isComplete,
-          currentReps: isDoneToday ? parsed.quota : updated[existingIdx].currentReps,
-        };
-      } else {
-        updated.push(parsed);
-      }
-    }
+      return parseHabitToHabitItem(bh, isDoneToday);
+    });
     saveHabitsState(updated);
-    currentHabits = updated;
+    try {
+      localStorage.setItem(STORAGE_KEYS.LAST_HABITS_DATE, today);
+    } catch (_) {}
+    return updated;
   }
 
-  return currentHabits;
+  return loadHabitsState();
 }
 
 /**
@@ -342,24 +328,40 @@ export function addPowerReserve(ticks: number = 2): number {
 
 /**
  * Direct ignition credit: when user completes an exercise during ignition,
- * credit matching habit quota immediately and clear it from the screen!
+ * credit the single matching habit quota immediately and clear it from the screen.
  */
-export function creditHabitFromIgnition(exerciseName: string, reps: number): { updated: HabitItem[]; isAllClear: boolean } {
+export function creditHabitFromIgnition(
+  exerciseName: string,
+  reps: number,
+  habitId?: string
+): { updated: HabitItem[]; isAllClear: boolean } {
   const habits = loadHabitsState();
-  const lowerName = exerciseName.toLowerCase();
+  const lowerName = exerciseName.toLowerCase().trim();
 
-  const updated = habits.map((h) => {
-    const habitLower = h.name.toLowerCase();
-    if (
-      habitLower === lowerName ||
-      habitLower.includes(lowerName) ||
-      lowerName.includes(habitLower) ||
-      (lowerName.includes('push') && habitLower.includes('push')) ||
-      (lowerName.includes('squat') && habitLower.includes('squat')) ||
-      (lowerName.includes('crun') && habitLower.includes('crun')) ||
-      (lowerName.includes('pull') && habitLower.includes('pull')) ||
-      (lowerName.includes('plank') && habitLower.includes('plank'))
-    ) {
+  let matchIdx = habitId ? habits.findIndex((h) => h.habit_id === habitId) : -1;
+  if (matchIdx === -1) {
+    matchIdx = habits.findIndex((h) => h.name.toLowerCase().trim() === lowerName);
+  }
+  if (matchIdx === -1) {
+    const baseName = lowerName
+      .replace(/\s*\((?:mrng|nt|morning|night|evening)\)\s*/gi, '')
+      .trim();
+    matchIdx = habits.findIndex(
+      (h) =>
+        !h.isComplete &&
+        (h.name.toLowerCase().includes(lowerName) ||
+          lowerName.includes(h.name.toLowerCase()) ||
+          (baseName.length > 0 && h.name.toLowerCase().includes(baseName)))
+    );
+    if (matchIdx === -1) {
+      matchIdx = habits.findIndex(
+        (h) => h.name.toLowerCase().includes(lowerName) || lowerName.includes(h.name.toLowerCase())
+      );
+    }
+  }
+
+  const updated = habits.map((h, idx) => {
+    if (idx === matchIdx) {
       const nextReps = Math.max(h.currentReps + reps, h.quota);
       return {
         ...h,

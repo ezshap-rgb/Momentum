@@ -352,21 +352,6 @@ export function loadLocalBoardData(): MomentumBoardData {
     if (raw) {
       const parsed = JSON.parse(raw);
       const rawHabits = Array.isArray(parsed.habits) ? [...parsed.habits] : [...DEFAULT_INITIAL_DATA.habits];
-      for (const defHabit of DEFAULT_INITIAL_DATA.habits) {
-        const defLower = defHabit.name.toLowerCase().replace(/\s*\(\d+\s*reps\)/gi, '').trim();
-        const existingIdx = rawHabits.findIndex((h: any) => {
-          const l = (h.name || '').toLowerCase();
-          return h.id === defHabit.id || l.includes(defLower) || defLower.includes(l);
-        });
-        if (existingIdx === -1) {
-          rawHabits.push(defHabit);
-        } else {
-          if (rawHabits[existingIdx].name !== defHabit.name && defHabit.name.startsWith('Push-ups')) {
-            rawHabits[existingIdx].name = defHabit.name;
-            rawHabits[existingIdx].target = defHabit.target;
-          }
-        }
-      }
 
       // Deduplicate habits by normalized name so accumulated duplicates are cleaned up
       const seenHabits = new Map<string, any>();

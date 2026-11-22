@@ -6,6 +6,7 @@ import {
   enqueuePendingGoogleTaskOp,
   removePendingGoogleTaskOp,
 } from './storageService';
+import { getTodayDateString } from './focusHabits';
 
 declare global {
   interface Window {
@@ -698,6 +699,20 @@ export function syncTasksIntoBoard(
   // They are never pruned when their Google Tasks are completed.
   const habits = [...boardData.habits];
 
+  // Track active habit names already inside the Habits list to avoid duplicating stray "Habit:" relocations
+  const existingHabitsListNames = new Set<string>();
+  for (const { listId, listTitle, tasks } of taskLists) {
+    const inHabitsBucket =
+      (dedicatedLists?.habitsListId && listId === dedicatedLists.habitsListId) ||
+      /habit/i.test(listTitle || '');
+    if (!inHabitsBucket) continue;
+    for (const t of tasks) {
+      if (!t.deleted && t.status !== 'completed' && !t.hidden && t.title) {
+        existingHabitsListNames.add(normalizeHabitName(t.title));
+      }
+    }
+  }
+
   for (const { listId, listTitle, tasks } of taskLists) {
     const listName = listTitle || '';
     const isProjectList = /project/i.test(listName);
@@ -886,9 +901,15 @@ export function syncTasksIntoBoard(
       // 3. HABITS (Tagged "Habit: ..." OR located in a Habits list)
       if (habitMatch || (isHabitList && !projMatch && !respMatch)) {
         const habitName = habitMatch ? habitMatch[1].trim() : rawTitle;
+        const normHabitName = normalizeHabitName(habitName);
 
-        // Relocate if sitting in main list or another list
-        if (dedicatedLists?.habitsListId && listId !== dedicatedLists.habitsListId) {
+        // Relocate only if sitting outside Habits list AND not already present in Habits list
+        if (
+          dedicatedLists?.habitsListId &&
+          listId !== dedicatedLists.habitsListId &&
+          !existingHabitsListNames.has(normHabitName)
+        ) {
+          existingHabitsListNames.add(normHabitName);
           tasksToRelocate.push({
             sourceListId: listId,
             targetListId: dedicatedLists.habitsListId,
@@ -899,29 +920,38 @@ export function syncTasksIntoBoard(
           });
         }
 
-        const normHabitName = normalizeHabitName(habitName);
         const existing = habits.find((h) => {
           if (taskId && h.googleTaskId === taskId) return true;
           return normalizeHabitName(h.name) === normHabitName;
         });
 
         if (!existing) {
+          const inferredDue = /\b(?:mrng|morning|am)\b/i.test(habitName)
+            ? 'Daily Morning'
+            : /\b(?:nt|night|evening|pm)\b/i.test(habitName)
+            ? 'Daily Night'
+            : 'Daily';
+          const numMatch = habitName.match(/\b(\d+)\b/);
+          const inferredTarget = numMatch ? parseInt(numMatch[1], 10) : 1;
+
           habits.push({
             id: `gt-hab-${taskId || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             name: habitName,
             type: 'boolean',
-            target: 1,
-            next_due: 'Daily',
+            target: inferredTarget,
+            next_due: inferredDue,
             log: {},
             googleTaskId: taskId,
             googleTaskListId: listId,
           });
           addedHabits++;
         } else {
-          existing.googleTaskId = taskId;
-          existing.googleTaskListId = listId;
+          if (isHabitList || !existing.googleTaskId) {
+            existing.googleTaskId = taskId;
+            existing.googleTaskListId = listId;
+          }
           if (task.status === 'completed') {
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getTodayDateString();
             existing.log[todayStr] = true;
           }
         }
@@ -1303,10 +1333,15 @@ export async function flushGoogleTaskCompletionsAndDeletions(
   const errors: string[] = [];
 
   const activeTaskMap = new Map<string, string>();
+  const habitTaskIds = new Set<string>();
   for (const list of activeTaskLists) {
+    const isHabitList = /habit/i.test(list.listTitle || '');
     for (const task of list.tasks) {
       if (task.id && !task.deleted && task.status !== 'completed' && !task.hidden) {
         activeTaskMap.set(task.id, list.listId);
+        if (isHabitList || /^habit(?::|\s+-)/i.test((task.title || '').trim())) {
+          habitTaskIds.add(task.id);
+        }
       }
     }
   }
@@ -1328,6 +1363,11 @@ export async function flushGoogleTaskCompletionsAndDeletions(
 
   // 1. Queued pending operations
   for (const op of getPendingGoogleTaskOps()) {
+    if (op.action === 'complete' && (op.itemType === 'habit' || habitTaskIds.has(op.taskId))) {
+      // Daily habits stay permanent in Google Tasks when checked off for today
+      removePendingGoogleTaskOp(op.taskId);
+      continue;
+    }
     if (!op.taskId.startsWith('title:') && activeTaskMap.has(op.taskId)) {
       opsToRun.set(op.taskId, {
         listId: activeTaskMap.get(op.taskId)!,
@@ -1378,7 +1418,7 @@ export async function flushGoogleTaskCompletionsAndDeletions(
   }
 
   const enqueueCompleteIfActive = (googleTaskId?: string) => {
-    if (!googleTaskId) return;
+    if (!googleTaskId || habitTaskIds.has(googleTaskId)) return;
     const activeListId = activeTaskMap.get(googleTaskId);
     if (activeListId && !opsToRun.has(googleTaskId)) {
       opsToRun.set(googleTaskId, {
@@ -1624,28 +1664,7 @@ export async function pushLocalTasksToGoogle(
     }
   }
 
-  // 4. Habits -> habitsListId
-  for (let i = 0; i < updatedHabits.length; i++) {
-    const habit = updatedHabits[i];
-    if (!habit.googleTaskId) {
-      if (habit.id === 'hab-1' || habit.id === 'hab-2') continue;
-      try {
-        const title = `Habit: ${habit.name}`;
-        const taskId = await createGoogleTask(accessToken, listConfig.habitsListId, title);
-        if (taskId) {
-          updatedHabits[i] = {
-            ...habit,
-            googleTaskId: taskId,
-            googleTaskListId: listConfig.habitsListId,
-          };
-          pushedTaskIds.push(taskId);
-          pushedCount++;
-        }
-      } catch (err: any) {
-        errors.push(`Habit "${habit.name}": ${err?.message || err}`);
-      }
-    }
-  }
+  // 4. Habits: persistent templates in Google Tasks are never auto-created or duplicated on sync.
 
   return {
     updatedBoard: {

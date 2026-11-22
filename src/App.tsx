@@ -11,6 +11,7 @@ import { VoiceIngestionModal } from './components/VoiceIngestionModal';
 import { Phase1TestScreen } from './components/Phase1TestScreen';
 import { DoMainScreen } from './components/DoMainScreen';
 import { PlanModeScreen } from './components/PlanModeScreen';
+import { getTodayDateString } from './services/focusHabits';
 import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 
 function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () => void; onOpenPlanMode?: () => void }) {
@@ -49,7 +50,7 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
   const activeRespCount = boardData.responsibilities.filter((r) => r.status === 'active').length;
   const activeProjCount = boardData.projects.length;
   const completedHabitsToday = boardData.habits.filter((h) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayDateString();
     const val = h.log[today];
     return h.type === 'boolean' ? !!val : typeof val === 'number' && val > 0;
   }).length;

@@ -56,6 +56,7 @@ import {
   HabitItem,
   formatExerciseDisplay,
   syncHabitsWithBoardData,
+  getTodayDateString,
 } from '../services/focusHabits';
 import { ScatteredHabitsBackground } from './focus/ScatteredHabitsBackground';
 import { HabitsModal } from './HabitsModal';
@@ -136,6 +137,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [showInspector, setShowInspector] = useState(false);
 
   // Daily Habits State (Scattered background & Ignition link)
+  const [todayDate, setTodayDate] = useState<string>(() => getTodayDateString());
   const [habits, setHabits] = useState<HabitItem[]>(() => loadHabitsState());
   const [allClearCelebration, setAllClearCelebration] = useState(false);
 
@@ -186,11 +188,34 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [targetOverrideMode, setTargetOverrideMode] = useState<ServeMode>('paired');
   const neitherTimeoutRef = useRef<number | null>(null);
 
-  // Synchronize daily habits with Board / Google Tasks habits
+  // Refresh todayDate when local midnight passes or tab regains focus
+  useEffect(() => {
+    const checkDateRollover = () => {
+      const current = getTodayDateString();
+      setTodayDate((prev) => (prev === current ? prev : current));
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkDateRollover();
+      }
+    };
+
+    const interval = window.setInterval(checkDateRollover, 60000);
+    window.addEventListener('focus', checkDateRollover);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', checkDateRollover);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
+  // Synchronize daily habits with Board / Google Tasks habits (and refresh daily)
   useEffect(() => {
     const synced = syncHabitsWithBoardData(boardData.habits);
     setHabits(synced);
-  }, [boardData.habits]);
+  }, [boardData.habits, todayDate]);
 
   // Screen wake lock during ignition and action execution
   useEffect(() => {
@@ -294,14 +319,11 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     setHabits(updated);
     triggerHaptic([40]);
 
-    // Also mark done for today in boardData / Google Tasks
-    const todayStr = new Date().toISOString().split('T')[0];
-    const match = boardData.habits.find(
-      (h) =>
-        h.id === habit.habit_id ||
-        h.name.toLowerCase().includes(habit.name.toLowerCase()) ||
-        habit.name.toLowerCase().includes(h.name.toLowerCase())
-    );
+    // Also mark done for today locally in dashboard habit tracker (Google Tasks stays untouched)
+    const todayStr = getTodayDateString();
+    const match =
+      boardData.habits.find((h) => h.id === habit.habit_id) ||
+      boardData.habits.find((h) => h.name.toLowerCase().trim() === habit.name.toLowerCase().trim());
     if (match && !match.log[todayStr]) {
       toggleHabitDate(match.id, todayStr);
     }
@@ -418,17 +440,18 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   // 3. ZERO-TAP BRIDGE: Finish Ignition -> Immediately show Offer
   const handleIgnitionDone = async () => {
     // Phase 7: Credit matching habit quota directly & clear from screen!
-    const { updated, isAllClear } = creditHabitFromIgnition(currentExercise.name, currentExercise.reps);
+    const { updated, isAllClear } = creditHabitFromIgnition(
+      currentExercise.name,
+      currentExercise.reps,
+      currentExercise.habitId
+    );
     setHabits(updated);
 
-    // Also mark done for today in boardData / Google Tasks
-    const todayStr = new Date().toISOString().split('T')[0];
-    const match = boardData.habits.find(
-      (h) =>
-        h.id === (currentExercise as any).habitId ||
-        h.name.toLowerCase().includes(currentExercise.name.toLowerCase()) ||
-        currentExercise.name.toLowerCase().includes(h.name.toLowerCase())
-    );
+    // Also mark done for today locally in dashboard habit tracker (Google Tasks stays untouched)
+    const todayStr = getTodayDateString();
+    const match =
+      boardData.habits.find((h) => currentExercise.habitId && h.id === currentExercise.habitId) ||
+      boardData.habits.find((h) => h.name.toLowerCase().trim() === currentExercise.name.toLowerCase().trim());
     if (match && !match.log[todayStr]) {
       toggleHabitDate(match.id, todayStr);
     }
