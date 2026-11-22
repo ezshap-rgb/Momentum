@@ -420,7 +420,9 @@ export function normalizeHabitName(name: string): string {
     .trim();
 }
 
-function normalizeGoogleTaskTitleForMatch(rawTitle: string): string {
+export type GoogleTaskItemType = 'quick' | 'resp' | 'proj' | 'habit';
+
+export function normalizeGoogleTaskTitleForMatch(rawTitle: string): string {
   const beforeDelimiter = (rawTitle || '').split('|')[0].split('->')[0];
   return beforeDelimiter
     .replace(/\[(?:1m|5m|15m|30m|1h|\d+m)\]/gi, ' ')
@@ -429,6 +431,44 @@ function normalizeGoogleTaskTitleForMatch(rawTitle: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+}
+
+export function makeTitleFallbackOpId(itemType: GoogleTaskItemType | undefined, title: string): string {
+  const norm = normalizeGoogleTaskTitleForMatch(title);
+  if (!norm) return '';
+  return `title:${itemType || 'any'}:${encodeURIComponent(norm)}`;
+}
+
+function isGoogleTaskMatchingItemType(
+  listTitle: string | undefined,
+  rawTaskTitle: string,
+  itemType?: GoogleTaskItemType
+): boolean {
+  const isHabit = /habit/i.test(listTitle || '') || /^habit(?::|\s+-)/i.test((rawTaskTitle || '').trim());
+  if (itemType === 'habit') return isHabit;
+  return !isHabit;
+}
+
+function findActiveGoogleTaskByTitle(
+  allLists: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[],
+  fallbackTitle: string,
+  itemType?: GoogleTaskItemType,
+  excludeTaskIds?: Set<string>
+): { listId: string; task: GoogleTaskItem } | null {
+  const normTarget = normalizeGoogleTaskTitleForMatch(fallbackTitle);
+  if (!normTarget) return null;
+
+  for (const list of allLists) {
+    for (const task of list.tasks) {
+      if (!task.id || task.deleted || task.status === 'completed' || task.hidden) continue;
+      if (excludeTaskIds && excludeTaskIds.has(task.id)) continue;
+      if (!isGoogleTaskMatchingItemType(list.listTitle, task.title, itemType)) continue;
+      if (normalizeGoogleTaskTitleForMatch(task.title) === normTarget) {
+        return { listId: list.listId, task };
+      }
+    }
+  }
+  return null;
 }
 
 function collectLocalCompletionState(boardData: MomentumBoardData): {
@@ -541,13 +581,16 @@ export function syncTasksIntoBoard(
   const deletedTaskIds = getDeletedGoogleTaskIds();
   const { activeLocalIds, completedLocalIds, completedLocalTitles } = collectLocalCompletionState(boardData);
 
-  // 30-minute grace period: tasks created or updated within 30 minutes are protected from remote pruning
-  const GRACE_PERIOD_MS = 30 * 60 * 1000;
-  const isProtectedFromPruning = (timestamp?: number, googleTaskId?: string) => {
+  // Short grace period only for brand-new local tasks still propagating; never shield Google-imported tasks (gt-*)
+  const LOCAL_CREATE_GRACE_MS = 15 * 1000;
+  const isProtectedFromPruning = (timestamp?: number, googleTaskId?: string, itemId?: string) => {
     if (googleTaskId && newlyCreatedTaskIds && newlyCreatedTaskIds.has(googleTaskId)) {
       return true;
     }
-    if (timestamp && Date.now() - timestamp < GRACE_PERIOD_MS) {
+    if (itemId && itemId.startsWith('gt-')) {
+      return false;
+    }
+    if (timestamp && Date.now() - timestamp < LOCAL_CREATE_GRACE_MS) {
       return true;
     }
     return false;
@@ -562,8 +605,8 @@ export function syncTasksIntoBoard(
       return false;
     }
 
-    // If protected by grace period or just pushed, preserve active tasks
-    if (isProtectedFromPruning(j.createdAt, j.googleTaskId)) {
+    // If protected by short local-create grace period or just pushed, preserve active tasks
+    if (isProtectedFromPruning(j.createdAt, j.googleTaskId, j.id)) {
       return true;
     }
 
@@ -595,7 +638,7 @@ export function syncTasksIntoBoard(
       return false;
     }
 
-    if (isProtectedFromPruning(r.createdAt, r.googleTaskId)) {
+    if (isProtectedFromPruning(r.createdAt, r.googleTaskId, r.id)) {
       return true;
     }
 
@@ -626,7 +669,7 @@ export function syncTasksIntoBoard(
       return false;
     }
 
-    if (isProtectedFromPruning(p.last_updated, p.googleTaskId)) {
+    if (isProtectedFromPruning(p.last_updated, p.googleTaskId, p.id)) {
       return true;
     }
 
@@ -1052,7 +1095,10 @@ async function sendGoogleTaskMutation(
   taskId: string,
   method: 'PATCH' | 'DELETE',
   body?: Record<string, any>,
-  treatAbsent404AsDone = true
+  treatAbsent404AsDone = true,
+  fallbackTitle?: string,
+  itemType?: GoogleTaskItemType,
+  excludeTaskIds?: Set<string>
 ): Promise<boolean> {
   const buildInit = (): RequestInit => ({
     method,
@@ -1062,14 +1108,44 @@ async function sendGoogleTaskMutation(
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
-  try {
-    const targetList = !listId || listId === '@default' ? '@default' : listId;
-    const listPath = formatListIdForUrl(targetList);
-    const taskPath = formatTaskIdForUrl(taskId);
-    const res = await fetch(
+  const executeMutation = (targetListId: string, targetTaskId: string) => {
+    const listPath = formatListIdForUrl(targetListId);
+    const taskPath = formatTaskIdForUrl(targetTaskId);
+    return fetch(
       `https://tasks.googleapis.com/tasks/v1/lists/${listPath}/tasks/${taskPath}`,
       buildInit()
     );
+  };
+
+  try {
+    if (taskId.startsWith('title:')) {
+      let allLists: { listId: string; listTitle: string; tasks: GoogleTaskItem[] }[];
+      try {
+        allLists = await fetchAllGoogleTasks(accessToken);
+      } catch {
+        return false;
+      }
+
+      const titleMatch = fallbackTitle
+        ? findActiveGoogleTaskByTitle(allLists, fallbackTitle, itemType, excludeTaskIds)
+        : null;
+      if (!titleMatch) {
+        return treatAbsent404AsDone;
+      }
+
+      const retryRes = await executeMutation(titleMatch.listId, titleMatch.task.id);
+      if (retryRes.ok || (method === 'DELETE' && retryRes.status === 204)) {
+        recordDeletedGoogleTaskId(titleMatch.task.id);
+        return true;
+      }
+      if (retryRes.status === 401) {
+        clearStoredAccessToken();
+      }
+      return false;
+    }
+
+    const targetList = !listId || listId === '@default' ? '@default' : listId;
+    const res = await executeMutation(targetList, taskId);
 
     if (res.ok || (method === 'DELETE' && res.status === 204)) {
       return true;
@@ -1093,11 +1169,7 @@ async function sendGoogleTaskMutation(
         (l) => l.listId !== targetList && l.tasks.some((t) => t.id === taskId)
       );
       if (matchingList) {
-        const altListPath = formatListIdForUrl(matchingList.listId);
-        const retryRes = await fetch(
-          `https://tasks.googleapis.com/tasks/v1/lists/${altListPath}/tasks/${taskPath}`,
-          buildInit()
-        );
+        const retryRes = await executeMutation(matchingList.listId, taskId);
         if (retryRes.ok || (method === 'DELETE' && retryRes.status === 204)) {
           return true;
         }
@@ -1112,6 +1184,22 @@ async function sendGoogleTaskMutation(
       );
       if (stillInTargetList) {
         return false;
+      }
+
+      // Relocated-ID fallback: another device relocated the task into a dedicated list with a new ID
+      if (fallbackTitle) {
+        const titleMatch = findActiveGoogleTaskByTitle(allLists, fallbackTitle, itemType, excludeTaskIds);
+        if (titleMatch) {
+          const titleRetryRes = await executeMutation(titleMatch.listId, titleMatch.task.id);
+          if (titleRetryRes.ok || (method === 'DELETE' && titleRetryRes.status === 204)) {
+            recordDeletedGoogleTaskId(titleMatch.task.id);
+            return true;
+          }
+          if (titleRetryRes.status === 401) {
+            clearStoredAccessToken();
+          }
+          return false;
+        }
       }
 
       // Not present in any active list (showCompleted=false): already completed/deleted remotely
@@ -1134,9 +1222,22 @@ async function sendGoogleTaskMutation(
 export async function markGoogleTaskCompleted(
   accessToken: string,
   listId: string,
-  taskId: string
+  taskId: string,
+  fallbackTitle?: string,
+  itemType?: GoogleTaskItemType,
+  excludeTaskIds?: Set<string>
 ): Promise<boolean> {
-  return sendGoogleTaskMutation(accessToken, listId, taskId, 'PATCH', { status: 'completed' }, true);
+  return sendGoogleTaskMutation(
+    accessToken,
+    listId,
+    taskId,
+    'PATCH',
+    { status: 'completed' },
+    true,
+    fallbackTitle,
+    itemType,
+    excludeTaskIds
+  );
 }
 
 /**
@@ -1164,9 +1265,22 @@ export async function reopenGoogleTask(
 export async function deleteGoogleTask(
   accessToken: string,
   listId: string,
-  taskId: string
+  taskId: string,
+  fallbackTitle?: string,
+  itemType?: GoogleTaskItemType,
+  excludeTaskIds?: Set<string>
 ): Promise<boolean> {
-  return sendGoogleTaskMutation(accessToken, listId, taskId, 'DELETE', undefined, true);
+  return sendGoogleTaskMutation(
+    accessToken,
+    listId,
+    taskId,
+    'DELETE',
+    undefined,
+    true,
+    fallbackTitle,
+    itemType,
+    excludeTaskIds
+  );
 }
 
 /**
@@ -1199,24 +1313,69 @@ export async function flushGoogleTaskCompletionsAndDeletions(
 
   const opsToRun = new Map<
     string,
-    { listId: string; action: 'complete' | 'delete'; fromPendingQueue: boolean }
+    {
+      listId: string;
+      action: 'complete' | 'delete';
+      fromPendingQueue: boolean;
+      pendingOpKey?: string;
+      title?: string;
+      itemType?: GoogleTaskItemType;
+    }
   >();
+
+  const { activeLocalIds, activeLocalTitles, completedLocalIds, completedLocalTitles } =
+    collectLocalCompletionState(boardData);
 
   // 1. Queued pending operations
   for (const op of getPendingGoogleTaskOps()) {
-    if (op.action === 'complete' && !activeTaskMap.has(op.taskId)) {
+    if (!op.taskId.startsWith('title:') && activeTaskMap.has(op.taskId)) {
+      opsToRun.set(op.taskId, {
+        listId: activeTaskMap.get(op.taskId)!,
+        action: op.action,
+        fromPendingQueue: true,
+        pendingOpKey: op.taskId,
+        title: op.title,
+        itemType: op.itemType,
+      });
+    } else if (op.title) {
+      const normTitle = normalizeGoogleTaskTitleForMatch(op.title);
+      if (op.itemType !== 'habit' && normTitle && activeLocalTitles.has(normTitle)) {
+        // Live active local item shares this title — do not touch Google Tasks by title
+        if (op.taskId.startsWith('title:') || op.action === 'complete') {
+          removePendingGoogleTaskOp(op.taskId);
+        }
+        continue;
+      }
+
+      const titleMatch = findActiveGoogleTaskByTitle(activeTaskLists, op.title, op.itemType, activeLocalIds);
+      if (titleMatch) {
+        recordDeletedGoogleTaskId(titleMatch.task.id);
+        opsToRun.set(titleMatch.task.id, {
+          listId: titleMatch.listId,
+          action: op.action,
+          fromPendingQueue: true,
+          pendingOpKey: op.taskId,
+          title: op.title,
+          itemType: op.itemType,
+        });
+      } else {
+        // Absent from all active Google Task lists by both ID and title
+        removePendingGoogleTaskOp(op.taskId);
+        continue;
+      }
+    } else if (op.action === 'complete') {
       // Already completed or deleted in Google Tasks
       removePendingGoogleTaskOp(op.taskId);
       continue;
+    } else {
+      opsToRun.set(op.taskId, {
+        listId: op.listId || '@default',
+        action: op.action,
+        fromPendingQueue: true,
+        pendingOpKey: op.taskId,
+      });
     }
-    opsToRun.set(op.taskId, {
-      listId: activeTaskMap.get(op.taskId) || op.listId || '@default',
-      action: op.action,
-      fromPendingQueue: true,
-    });
   }
-
-  const { activeLocalIds, completedLocalIds, completedLocalTitles } = collectLocalCompletionState(boardData);
 
   const enqueueCompleteIfActive = (googleTaskId?: string) => {
     if (!googleTaskId) return;
@@ -1267,11 +1426,11 @@ export async function flushGoogleTaskCompletionsAndDeletions(
 
   // 3. Execute remote updates
   const hadStoredToken = !!getStoredAccessToken();
-  for (const [taskId, { listId, action, fromPendingQueue }] of opsToRun.entries()) {
+  for (const [taskId, { listId, action, fromPendingQueue, pendingOpKey, title, itemType }] of opsToRun.entries()) {
     const ok =
       action === 'delete'
-        ? await deleteGoogleTask(accessToken, listId, taskId)
-        : await markGoogleTaskCompleted(accessToken, listId, taskId);
+        ? await deleteGoogleTask(accessToken, listId, taskId, title, itemType, activeLocalIds)
+        : await markGoogleTaskCompleted(accessToken, listId, taskId, title, itemType, activeLocalIds);
 
     if (ok) {
       flushedTaskIds.add(taskId);
@@ -1279,7 +1438,10 @@ export async function flushGoogleTaskCompletionsAndDeletions(
       else completedCount++;
 
       if (fromPendingQueue) {
-        removePendingGoogleTaskOp(taskId);
+        removePendingGoogleTaskOp(pendingOpKey || taskId);
+        if (pendingOpKey && pendingOpKey !== taskId) {
+          removePendingGoogleTaskOp(taskId);
+        }
       }
     } else {
       errors.push(`Failed to ${action} Google Task ${taskId} in list ${listId}`);
@@ -1289,6 +1451,8 @@ export async function flushGoogleTaskCompletionsAndDeletions(
           listId,
           action,
           timestamp: Date.now(),
+          ...(title ? { title } : {}),
+          ...(itemType ? { itemType } : {}),
         });
       }
       if (hadStoredToken && !getStoredAccessToken()) break;
@@ -1533,7 +1697,17 @@ async function postWebhookTaskAction(
       method: 'POST',
       body: JSON.stringify({ action, taskId }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    try {
+      const text = await res.text();
+      if (text) {
+        const data = JSON.parse(text);
+        if (data && data.ok === false) return false;
+      }
+    } catch {
+      // Ignore non-JSON response bodies when HTTP status is OK
+    }
+    return true;
   } catch (e) {
     console.warn(`Webhook ${action} failed:`, e);
     return false;

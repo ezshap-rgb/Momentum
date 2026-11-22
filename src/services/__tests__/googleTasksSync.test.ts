@@ -13,6 +13,7 @@ import {
   deleteGoogleTask,
   flushGoogleTaskCompletionsAndDeletions,
   syncTasksIntoBoard,
+  makeTitleFallbackOpId,
 } from '../googleTasksService';
 import { getDeletedGoogleTaskIds } from '../storageService';
 import { MomentumBoardData } from '../../types';
@@ -517,6 +518,196 @@ describe('Google Tasks Write-Back Queue & Flush Sync', () => {
       expect(res.updatedBoard.responsibilities.map((r) => r.title)).toEqual(['Renew Passport']);
       expect(res.tasksToRelocate).toBeUndefined();
       expect(res.removedTasks).toBe(3);
+    });
+
+    it('falls back to normalized title delete when DELETE gets 404 due to relocated ID and records the live ID', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/lists/old_list/tasks/old_relocated_id') && init?.method === 'DELETE') {
+          return new Response('Not Found', { status: 404 });
+        }
+        if (url === 'https://tasks.googleapis.com/tasks/v1/users/@me/lists') {
+          return new Response(
+            JSON.stringify({
+              items: [
+                { id: 'old_list', title: 'My Tasks' },
+                { id: 'tasks_list', title: 'Tasks' },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.includes('/lists/old_list/tasks?')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        if (url.includes('/lists/tasks_list/tasks?')) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: 'new_live_id',
+                  title: 'Task: Buy Filters',
+                  status: 'needsAction',
+                  updated: '2026-11-22T10:00:00Z',
+                },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.endsWith('/lists/tasks_list/tasks/new_live_id') && init?.method === 'DELETE') {
+          return new Response(null, { status: 204 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const ok = await deleteGoogleTask('tok_del', 'old_list', 'old_relocated_id', 'Buy Filters', 'quick');
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://tasks.googleapis.com/tasks/v1/lists/tasks_list/tasks/new_live_id',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(getDeletedGoogleTaskIds().has('new_live_id')).toBe(true);
+    });
+
+    it('resolves synthetic title:quick:... deletes when local item had no googleTaskId', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === 'https://tasks.googleapis.com/tasks/v1/users/@me/lists') {
+          return new Response(JSON.stringify({ items: [{ id: 'tasks_list', title: 'Tasks' }] }), { status: 200 });
+        }
+        if (url.includes('/lists/tasks_list/tasks?')) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: 'live_unlinked_task',
+                  title: 'Task: Scrub Sink [5m]',
+                  status: 'needsAction',
+                  updated: '2026-11-22T10:00:00Z',
+                },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.endsWith('/lists/tasks_list/tasks/live_unlinked_task') && init?.method === 'DELETE') {
+          return new Response(null, { status: 204 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const synthId = makeTitleFallbackOpId('quick', 'Scrub Sink');
+      expect(synthId).toBe('title:quick:scrub%20sink');
+
+      const ok = await deleteGoogleTask('tok_synth', '@default', synthId, 'Scrub Sink', 'quick');
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://tasks.googleapis.com/tasks/v1/lists/tasks_list/tasks/live_unlinked_task',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(getDeletedGoogleTaskIds().has('live_unlinked_task')).toBe(true);
+    });
+
+    it('flushes queued deletes/completes with stale relocated IDs or synthetic title keys while sparing active titles', async () => {
+      enqueuePendingGoogleTaskOp({
+        taskId: 'stale_relocated_delete_id',
+        listId: 'My Tasks',
+        action: 'delete',
+        timestamp: 10,
+        title: 'Reset Router',
+        itemType: 'quick',
+      });
+      enqueuePendingGoogleTaskOp({
+        taskId: makeTitleFallbackOpId('quick', 'Water Ferns'),
+        listId: '@default',
+        action: 'delete',
+        timestamp: 11,
+        title: 'Water Ferns',
+        itemType: 'quick',
+      });
+      enqueuePendingGoogleTaskOp({
+        taskId: makeTitleFallbackOpId('quick', 'Keep Duplicate'),
+        listId: '@default',
+        action: 'delete',
+        timestamp: 12,
+        title: 'Keep Duplicate',
+        itemType: 'quick',
+      });
+
+      const boardData = makeEmptyBoard({
+        quick_jobs: [
+          { id: 'qj-active-dup', title: 'Keep Duplicate', done: false, createdAt: Date.now() },
+        ],
+      });
+
+      const activeTaskLists = [
+        {
+          listId: 'tasks_list',
+          listTitle: 'Tasks',
+          tasks: [
+            { id: 'gt_reloc_router', title: 'Task: Reset Router', status: 'needsAction' as const, updated: '2026-11-22T10:00:00Z' },
+            { id: 'gt_ferns', title: 'Task: Water Ferns', status: 'needsAction' as const, updated: '2026-11-22T10:00:00Z' },
+            { id: 'gt_dup', title: 'Task: Keep Duplicate', status: 'needsAction' as const, updated: '2026-11-22T10:00:00Z' },
+          ],
+        },
+      ];
+
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return new Response(null, { status: 204 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await flushGoogleTaskCompletionsAndDeletions('tok_flush_reloc', boardData, activeTaskLists);
+      expect(res.deletedCount).toBe(2);
+      expect(res.flushedTaskIds).toEqual(new Set(['gt_reloc_router', 'gt_ferns']));
+      expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('gt_dup'), expect.anything());
+      expect(getPendingGoogleTaskOps()).toEqual([]);
+    });
+
+    it('immediately prunes Google-imported gt-* tasks deleted on another device even within minutes, while shielding brand-new local tasks', () => {
+      const now = Date.now();
+      const boardData = makeEmptyBoard({
+        quick_jobs: [
+          {
+            id: 'gt-qj-deleted-remotely',
+            title: 'Phone Deleted Task',
+            done: false,
+            createdAt: now - 2000,
+            googleTaskId: 'gt_missing_remote',
+          },
+          {
+            id: 'qj-local-brand-new',
+            title: 'Just Created Local Task',
+            done: false,
+            createdAt: now - 2000,
+            googleTaskId: 'gt_just_created_not_indexed',
+          },
+          {
+            id: 'qj-local-pushed',
+            title: 'Pushed This Cycle',
+            done: false,
+            createdAt: now - 60000,
+            googleTaskId: 'gt_pushed_cycle',
+          },
+        ],
+      });
+
+      const res = syncTasksIntoBoard(
+        boardData,
+        [{ listId: 'tasks_list', listTitle: 'Tasks', tasks: [] }],
+        false,
+        new Set(['gt_pushed_cycle'])
+      );
+
+      expect(res.updatedBoard.quick_jobs.map((j) => j.id)).toEqual([
+        'qj-local-brand-new',
+        'qj-local-pushed',
+      ]);
+      expect(res.removedTasks).toBe(1);
     });
   });
 });

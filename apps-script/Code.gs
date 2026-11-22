@@ -452,7 +452,15 @@ function foldEventsToActions() {
       modified = true;
 
       // Complete Google Task in Google Tasks API
-      markGoogleTaskCompletedById(taskId);
+      markGoogleTaskCompletedById(taskId, payload.title ? String(payload.title) : '');
+      foldedCompletedTaskIds.add(taskId);
+    } else if (eventType === 'action_deleted') {
+      rowData[22] = 'deleted'; // status
+      rowData[32] = eventId;
+      modified = true;
+
+      // Delete Google Task in Google Tasks API
+      deleteGoogleTaskById(taskId, payload.title ? String(payload.title) : '');
       foldedCompletedTaskIds.add(taskId);
     }
   }
@@ -465,28 +473,86 @@ function foldEventsToActions() {
   return foldedCompletedTaskIds;
 }
 
+function normalizeTaskTitleForMatch_(rawTitle) {
+  const beforeDelimiter = String(rawTitle || '').split('|')[0].split('->')[0];
+  return beforeDelimiter
+    .replace(/\[(?:1m|5m|15m|30m|1h|\d+m)\]/gi, ' ')
+    .trim()
+    .replace(/^(?:habit|daily|routine|project|proj|resp|responsibility|bigger\s*job|job|bigger|quick|task)(?::|\s+-)\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findGoogleTaskByIdOrTitle_(listId, taskId, fallbackTitle) {
+  if (taskId) {
+    try {
+      const task = Tasks.Tasks.get(listId, taskId);
+      if (task && !task.deleted) {
+        return task;
+      }
+    } catch (_) {
+      // Not in this list, continue
+    }
+  }
+
+  const normTarget = normalizeTaskTitleForMatch_(fallbackTitle);
+  if (!normTarget) return null;
+
+  try {
+    const listed = Tasks.Tasks.list(listId, { showCompleted: false, showHidden: false, maxResults: 100 });
+    const items = (listed && listed.items) || [];
+    for (let i = 0; i < items.length; i++) {
+      const t = items[i];
+      if (!t || t.deleted || t.status === 'completed' || t.hidden) continue;
+      if (normalizeTaskTitleForMatch_(t.title) === normTarget) {
+        return t;
+      }
+    }
+  } catch (_) {
+    // Ignore list errors
+  }
+  return null;
+}
+
 /**
- * Completes a task in Google Tasks by its ID across all lists
+ * Completes a task in Google Tasks by its ID or fallback normalized title across all lists
  */
-function markGoogleTaskCompletedById(taskId) {
+function markGoogleTaskCompletedById(taskId, fallbackTitle) {
   try {
     const taskLists = Tasks.Tasklists.list();
     if (!taskLists.items) return;
     for (const list of taskLists.items) {
-      try {
-        const task = Tasks.Tasks.get(list.id, taskId);
-        if (task) {
-          task.status = 'completed';
-          Tasks.Tasks.update(task, list.id, taskId);
-          Logger.log(`Marked Google Task completed: ${taskId} in list ${list.title}`);
-          return;
-        }
-      } catch (_) {
-        // Not in this list, continue
+      const task = findGoogleTaskByIdOrTitle_(list.id, taskId, fallbackTitle);
+      if (task && task.id) {
+        task.status = 'completed';
+        Tasks.Tasks.update(task, list.id, task.id);
+        Logger.log(`Marked Google Task completed: ${task.id} in list ${list.title}`);
+        return;
       }
     }
   } catch (err) {
-    Logger.log(`Failed to complete task ${taskId}: ` + err);
+    Logger.log(`Failed to complete task ${taskId || fallbackTitle}: ` + err);
+  }
+}
+
+/**
+ * Deletes a task in Google Tasks by its ID or fallback normalized title across all lists
+ */
+function deleteGoogleTaskById(taskId, fallbackTitle) {
+  try {
+    const taskLists = Tasks.Tasklists.list();
+    if (!taskLists.items) return;
+    for (const list of taskLists.items) {
+      const task = findGoogleTaskByIdOrTitle_(list.id, taskId, fallbackTitle);
+      if (task && task.id) {
+        Tasks.Tasks.remove(list.id, task.id);
+        Logger.log(`Deleted Google Task: ${task.id} in list ${list.title}`);
+        return;
+      }
+    }
+  } catch (err) {
+    Logger.log(`Failed to delete task ${taskId || fallbackTitle}: ` + err);
   }
 }
 
@@ -582,15 +648,21 @@ function doPost(e) {
 
       sheet.appendRow(row);
 
-      // If it's a completion event, fold immediately and also complete directly on Google Tasks if not in Actions tab
-      if (event.type === 'action_completed') {
+      // If it's a completion or deletion event, fold immediately and mirror directly to Google Tasks
+      if (event.type === 'action_completed' || event.type === 'action_deleted') {
         const folded = foldEventsToActions();
         let evPayload = event.payload;
         if (typeof evPayload === 'string' && evPayload.startsWith('{')) {
           try { evPayload = JSON.parse(evPayload); } catch (_) {}
         }
-        if (evPayload && evPayload.task_id && !folded.has(String(evPayload.task_id))) {
-          markGoogleTaskCompletedById(String(evPayload.task_id));
+        const tid = evPayload && evPayload.task_id ? String(evPayload.task_id) : '';
+        const title = evPayload && evPayload.title ? String(evPayload.title) : '';
+        if ((tid && !folded.has(tid)) || (!tid && title)) {
+          if (event.type === 'action_deleted') {
+            deleteGoogleTaskById(tid, title);
+          } else {
+            markGoogleTaskCompletedById(tid, title);
+          }
         }
       }
 
@@ -606,8 +678,8 @@ function doPost(e) {
       const rowsToAppend = [];
       const appendedIds = [];
       const skippedIds = [];
-      const newlyAppendedCompletedTaskIds = [];
-      let hasCompletion = false;
+      const newlyAppendedTaskOps = [];
+      let hasMutation = false;
 
       for (let i = 0; i < events.length; i++) {
         const ev = events[i];
@@ -628,14 +700,16 @@ function doPost(e) {
           ev.schema_version || '1.0'
         ]);
         appendedIds.push(strId);
-        if (ev.type === 'action_completed') {
-          hasCompletion = true;
+        if (ev.type === 'action_completed' || ev.type === 'action_deleted') {
+          hasMutation = true;
           let evPayload = ev.payload;
           if (typeof evPayload === 'string' && evPayload.startsWith('{')) {
             try { evPayload = JSON.parse(evPayload); } catch (_) {}
           }
-          if (evPayload && evPayload.task_id) {
-            newlyAppendedCompletedTaskIds.push(String(evPayload.task_id));
+          const tid = evPayload && evPayload.task_id ? String(evPayload.task_id) : '';
+          const title = evPayload && evPayload.title ? String(evPayload.title) : '';
+          if (tid || title) {
+            newlyAppendedTaskOps.push({ type: ev.type, tid, title });
           }
         }
       }
@@ -644,12 +718,16 @@ function doPost(e) {
         sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, 6).setValues(rowsToAppend);
       }
 
-      if (hasCompletion) {
+      if (hasMutation) {
         const folded = foldEventsToActions();
-        for (let k = 0; k < newlyAppendedCompletedTaskIds.length; k++) {
-          const tid = newlyAppendedCompletedTaskIds[k];
-          if (!folded.has(tid)) {
-            markGoogleTaskCompletedById(tid);
+        for (let k = 0; k < newlyAppendedTaskOps.length; k++) {
+          const item = newlyAppendedTaskOps[k];
+          if ((item.tid && !folded.has(item.tid)) || (!item.tid && item.title)) {
+            if (item.type === 'action_deleted') {
+              deleteGoogleTaskById(item.tid, item.title);
+            } else {
+              markGoogleTaskCompletedById(item.tid, item.title);
+            }
           }
         }
       }

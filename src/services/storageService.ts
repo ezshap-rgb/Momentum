@@ -240,6 +240,8 @@ export interface PendingGoogleTaskOp {
   listId: string;
   action: 'complete' | 'delete';
   timestamp: number;
+  title?: string;
+  itemType?: 'quick' | 'resp' | 'proj' | 'habit';
 }
 
 export function getPendingGoogleTaskOps(): PendingGoogleTaskOp[] {
@@ -272,12 +274,18 @@ export function enqueuePendingGoogleTaskOp(op: PendingGoogleTaskOp): void {
       listId: op.listId || '@default',
       action: op.action,
       timestamp: op.timestamp || Date.now(),
+      ...(op.title ? { title: op.title } : {}),
+      ...(op.itemType ? { itemType: op.itemType } : {}),
     };
     if (idx >= 0) {
       const existing = ops[idx];
+      const mergedTitle = normalizedOp.title || existing.title;
+      const mergedItemType = normalizedOp.itemType || existing.itemType;
       ops[idx] = {
         ...normalizedOp,
         action: existing.action === 'delete' ? 'delete' : normalizedOp.action,
+        ...(mergedTitle ? { title: mergedTitle } : {}),
+        ...(mergedItemType ? { itemType: mergedItemType } : {}),
       };
     } else {
       ops.push(normalizedOp);

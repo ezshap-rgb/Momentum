@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useMomentum } from '../context/MomentumContext';
+import { getStoredAccessToken } from '../services/googleTasksService';
 import {
   Sun,
   Moon,
@@ -200,7 +201,9 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800'
             }`}
             title={
-              pendingGoogleTaskOpsCount > 0
+              pendingGoogleTaskOpsCount > 0 && !settings.googleTasksWebhookUrl && !getStoredAccessToken()
+                ? `Google Tasks session expired on this device — click to reconnect and sync ${pendingGoogleTaskOpsCount} pending change(s)`
+                : pendingGoogleTaskOpsCount > 0
                 ? `${pendingGoogleTaskOpsCount} completed/deleted task(s) waiting to sync to Google Tasks — click to sync now`
                 : settings.googleTasksConnected
                 ? 'Sync Google Tasks from your phone'
