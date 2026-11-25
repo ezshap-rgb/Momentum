@@ -19,11 +19,13 @@ import {
   X,
 } from 'lucide-react';
 
-export const HabitsPanel: React.FC = () => {
+interface HabitsPanelProps {
+  layout?: 'list' | 'grid';
+}
+
+export const HabitsPanel: React.FC<HabitsPanelProps> = ({ layout = 'list' }) => {
   const {
     boardData,
-    toggleHabitDate,
-    setHabitDuration,
     addHabit,
     editHabit,
     deleteHabit,
@@ -411,15 +413,13 @@ export const HabitsPanel: React.FC = () => {
                           const isToday = dStr === todayStr;
 
                           return (
-                            <button
+                            <div
                               key={dayNum}
-                              type="button"
-                              onClick={() => toggleHabitDate(habit.id, dStr)}
-                              title={`${dStr}: ${isDone ? 'Completed' : 'Rest day'} (Click to toggle)`}
-                              className={`h-6 rounded-md text-[10px] font-bold flex items-center justify-center transition select-none ${
+                              title={`${dStr}: ${isDone ? 'Completed' : 'Rest day'} (Logged from DO screen)`}
+                              className={`h-6 rounded-md text-[10px] font-bold flex items-center justify-center select-none ${
                                 isDone
-                                  ? 'bg-pink-600 text-white shadow-xs hover:bg-pink-500'
-                                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-pink-400'
+                                  ? 'bg-pink-600 text-white shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                               } ${isToday ? 'ring-2 ring-pink-500 font-extrabold' : ''}`}
                             >
                               {isDone ? (
@@ -427,7 +427,7 @@ export const HabitsPanel: React.FC = () => {
                               ) : (
                                 dayNum
                               )}
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -437,8 +437,14 @@ export const HabitsPanel: React.FC = () => {
               })}
             </div>
           ) : (
-            /* VIEW TAB: TODAY'S RHYTHMS (Fast checklist + 1-click month inspection) */
-            <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
+            /* VIEW TAB: TODAY'S RHYTHMS (Stable editable templates; checked off strictly on DO page) */
+            <div
+              className={
+                layout === 'grid'
+                  ? 'overflow-y-auto flex-1 min-h-0 pr-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5 content-start'
+                  : 'space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1'
+              }
+            >
               {habits.length === 0 && (
                 <p className="text-xs text-slate-400 text-center py-4 italic">
                   No habits configured.
@@ -598,38 +604,13 @@ export const HabitsPanel: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Daily Check Actions */}
+                          {/* Stable Template Status + Edit Action (Check off only on DO screen) */}
                           <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                            {habit.type === 'boolean' ? (
-                              <button
-                                onClick={() => toggleHabitDate(habit.id, todayStr)}
-                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                                  isDone
-                                    ? 'bg-emerald-600 text-white shadow-xs'
-                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                                }`}
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                                <span>{isDone ? 'Done' : 'Check'}</span>
-                              </button>
-                            ) : (
-                              <div className="flex items-center gap-1 text-[11px]">
-                                <span className="font-mono font-bold text-pink-600 dark:text-pink-400">
-                                  {typeof todayVal === 'number' ? `${todayVal}m` : '0m'}
-                                </span>
-                                <button
-                                  onClick={() =>
-                                    setHabitDuration(
-                                      habit.id,
-                                      todayStr,
-                                      (typeof todayVal === 'number' ? todayVal : 0) + 15
-                                    )
-                                  }
-                                  className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-bold"
-                                >
-                                  +15m
-                                </button>
-                              </div>
+                            {isDone && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                <Check className="w-3 h-3" />
+                                <span>Done today</span>
+                              </span>
                             )}
 
                             <button
@@ -652,7 +633,7 @@ export const HabitsPanel: React.FC = () => {
                           <span className="font-bold text-pink-600 dark:text-pink-400">
                             {monthLabel} Accountability Grid
                           </span>
-                          <span>Click any day to toggle / backfill</span>
+                          <span>Logged from DO screen</span>
                         </div>
                         <div className="grid grid-cols-7 gap-1 text-center">
                           {Array.from({ length: firstDayOfWeek }).map((_, i) => (
@@ -669,18 +650,17 @@ export const HabitsPanel: React.FC = () => {
                             const isToday = dStr === todayStr;
 
                             return (
-                              <button
+                              <div
                                 key={dayNum}
-                                type="button"
-                                onClick={() => toggleHabitDate(habit.id, dStr)}
-                                className={`h-5 rounded text-[9px] font-bold flex items-center justify-center transition ${
+                                title={`${dStr}: ${isD ? 'Logged' : 'Not logged'} (Logged from DO screen)`}
+                                className={`h-5 rounded text-[9px] font-bold flex items-center justify-center ${
                                   isD
                                     ? 'bg-pink-600 text-white font-extrabold'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
                                 } ${isToday ? 'ring-1 ring-pink-500' : ''}`}
                               >
                                 {isD ? '✓' : dayNum}
-                              </button>
+                              </div>
                             );
                           })}
                         </div>

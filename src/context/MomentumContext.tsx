@@ -55,6 +55,7 @@ import {
 } from '../services/googleTasksService';
 import { getStoredCredentials, queueEvent } from '../services/focusDataLayer';
 import { getTodayDateString } from '../services/focusHabits';
+import { reorderQuickJobList } from '../services/taskOrder';
 
 interface MomentumContextType {
   boardData: MomentumBoardData;
@@ -92,6 +93,7 @@ interface MomentumContextType {
   toggleQuickJob: (id: string) => void;
   deleteQuickJob: (id: string) => void;
   editQuickJob: (id: string, updates: { title?: string; duration?: QuickJobDuration; due?: string | null }) => void;
+  reorderQuickJobs: (orderedActiveIds: string[]) => void;
   // Responsibilities (Jobs)
   addResponsibility: (
     title: string,
@@ -704,6 +706,16 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     },
     [updateBoard, dispatchGoogleTaskWrite]
+  );
+
+  const reorderQuickJobs = useCallback(
+    (orderedActiveIds: string[]) => {
+      updateBoard((prev) => ({
+        ...prev,
+        quick_jobs: reorderQuickJobList(prev.quick_jobs, orderedActiveIds),
+      }));
+    },
+    [updateBoard]
   );
 
   // Responsibilities
@@ -1852,6 +1864,7 @@ export const MomentumProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         toggleQuickJob,
         deleteQuickJob,
         editQuickJob,
+        reorderQuickJobs,
         addResponsibility,
         advanceResponsibilityStep,
         regressResponsibilityStep,

@@ -58,7 +58,9 @@ import {
   syncHabitsWithBoardData,
   getTodayDateString,
 } from '../services/focusHabits';
-import { ScatteredHabitsBackground } from './focus/ScatteredHabitsBackground';
+import { DoSideTaskList } from './focus/DoSideTaskList';
+import { DoSideHabitList } from './focus/DoSideHabitList';
+import { getNextOrderedQuickJobs } from '../services/taskOrder';
 import { HabitsModal } from './HabitsModal';
 import {
   getExperimentScheduleStatus,
@@ -103,7 +105,7 @@ interface Props {
 type DoStage = 'do_button' | 'ignition' | 'offer' | 'action_running';
 
 export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
-  const { settings, toggleTheme, boardData, toggleHabitDate } = useMomentum();
+  const { settings, toggleTheme, boardData, toggleHabitDate, toggleQuickJob, reorderQuickJobs } = useMomentum();
 
   // Navigation / Modal States
   const [stage, setStage] = useState<DoStage>('do_button');
@@ -553,6 +555,58 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
       return;
     }
 
+    const completedIds = new Set(activeCompleted.map((a) => a.task_id));
+    const orderedQueue = getNextOrderedQuickJobs(boardData.quick_jobs, activeSkipped, completedIds);
+
+    if (orderedQueue.length > 0) {
+      const orderedScores: CandidateScore[] = orderedQueue.map((job, idx) => {
+        const friction = job.duration === '1m' ? 1 : job.duration === '15m' ? 3 : 2;
+        const action: FocusAction = {
+          task_id: job.id,
+          title: job.title,
+          friction,
+          time_bucket: job.duration || '5m',
+          category: 'quick',
+          type: 'admin',
+          first_action: `Start: ${job.title}`,
+          due_date: job.due || undefined,
+          status: 'waiting',
+        };
+        return {
+          action,
+          totalScore: orderedQueue.length - idx,
+          targetFriction: friction,
+          effectiveFriction: friction,
+          urgencyScore: 0,
+          importanceScore: 0,
+          ageScore: 0,
+          heartbeatScore: 0,
+          varietyScore: 0,
+          isTripwire: false,
+          isReservedSlot: false,
+          reasons: [`#${idx + 1} in your ordered task list`],
+        };
+      });
+
+      const first = orderedScores[0];
+      setRankedCandidates(orderedScores);
+      setPairedCandidates(null);
+      setCurrentAction(first.action);
+      setCurrentScoreData(first);
+      setIsMicroFirstStepOnly(notNowCount >= 2);
+      setStage('offer');
+
+      queueEvent('offer_served', {
+        task_id: first.action.task_id,
+        mode: 'assigned',
+        target_friction: first.targetFriction,
+        micro_only: notNowCount >= 2,
+        is_tripwire: false,
+        is_reserved: false,
+      });
+      return;
+    }
+
     const ctx: SessionContext = {
       completedActions: activeCompleted,
       totalActiveMinutes: activeMinutes,
@@ -765,8 +819,15 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
     setIsTimerRunning(false);
     const minutes = Math.max(1, Math.round(timerSeconds / 60));
 
+    const matchingQuickJob = currentAction
+      ? boardData.quick_jobs.find((j) => j.id === currentAction.task_id && !j.done)
+      : undefined;
+    if (matchingQuickJob) {
+      toggleQuickJob(matchingQuickJob.id);
+    }
+
     await queueEvent('action_completed', {
-      task_id: currentAction?.task_id,
+      task_id: matchingQuickJob?.googleTaskId || currentAction?.task_id,
       actual_minutes: minutes,
       friction: currentAction?.friction,
       mode: servingMode,
@@ -925,41 +986,81 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         </div>
       </div>
 
-      {/* SCATTERED HABITS BACKGROUND (Disappear over the day with 1 tap, accessible anytime) */}
-      {!showConfig && (
-        <ScatteredHabitsBackground
-          habits={habits}
-          onDismiss={handleDismissHabit}
-          isAllClear={allClearCelebration}
-        />
-      )}
+      {/* STAGE 1: CENTRAL DO BUTTON + LEFT ORDERED TASKS + RIGHT HABITS */}
+      {stage === 'do_button' && !showConfig && (() => {
+        const activeQuickTasks = boardData.quick_jobs.filter((j) => !j.done);
+        return (
+          <div className="flex-1 min-h-0 w-full max-w-6xl mx-auto flex flex-col md:grid md:grid-cols-[minmax(220px,280px)_1fr_minmax(220px,280px)] gap-3 sm:gap-4 py-2 overflow-hidden relative">
+            {allClearCelebration && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium flex items-center gap-2 backdrop-blur-md animate-fadeIn shadow-lg shadow-amber-950/40 whitespace-nowrap">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Screen Cleared · All Daily Habits Done (+5 pts)</span>
+              </div>
+            )}
 
-      {/* STAGE 1: GIANT DO BUTTON */}
-      {stage === 'do_button' && !showConfig && (
-        <div className="flex-1 flex flex-col items-center justify-center my-auto">
-          <div className="relative flex items-center justify-center">
-            <div className="absolute w-64 h-64 sm:w-80 sm:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
+            {/* CENTER: Prominent DO Button (top on mobile, middle column on desktop) */}
+            <div className="order-1 md:order-2 flex flex-col items-center justify-center shrink-0 md:shrink py-2 md:my-auto">
+              <div className="relative flex items-center justify-center">
+                <div className="absolute w-52 h-52 sm:w-72 sm:h-72 md:w-80 md:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
 
-            <button
-              onClick={handleDoPress}
-              className="relative w-56 h-56 sm:w-68 sm:h-68 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-6xl sm:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
-            >
-              <span>DO</span>
-              <span className="text-xs uppercase font-extrabold tracking-widest text-purple-200/90">
-                Ignition
-              </span>
-            </button>
+                <button
+                  onClick={handleDoPress}
+                  className="relative w-44 h-44 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-5xl sm:text-6xl md:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
+                >
+                  <span>DO</span>
+                  <span className="text-[11px] sm:text-xs uppercase font-extrabold tracking-widest text-purple-200/90">
+                    Ignition
+                  </span>
+                </button>
+              </div>
+
+              {activeQuickTasks.length > 0 && (
+                <div className="mt-3 sm:mt-4 max-w-[260px] text-center">
+                  <span className="text-[11px] text-slate-500">Up next: </span>
+                  <span className="text-[11px] text-slate-300/90 font-medium truncate inline-block max-w-[190px] align-bottom">
+                    {activeQuickTasks[0].title}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* LEFT Tasks (Ordered) + RIGHT Habits */}
+            <div className="order-2 md:contents flex-1 min-h-0 grid grid-cols-2 gap-2 overflow-hidden">
+              <div className="md:order-1 min-h-0 flex flex-col overflow-hidden">
+                <DoSideTaskList
+                  tasks={activeQuickTasks}
+                  onReorder={reorderQuickJobs}
+                  onCompleteTask={toggleQuickJob}
+                />
+              </div>
+              <div className="md:order-3 min-h-0 flex flex-col overflow-hidden">
+                <DoSideHabitList
+                  habits={habits}
+                  onDismiss={handleDismissHabit}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* STAGE 2: PHYSICAL IGNITION SCREEN */}
       {stage === 'ignition' && !showConfig && (
         <div className="flex-1 flex flex-col items-center justify-center max-w-sm mx-auto w-full px-4 animate-fadeIn">
           <div className="w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 text-center shadow-2xl backdrop-blur-md">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold uppercase tracking-wider mb-6">
-              <Flame className="w-4 h-4 text-amber-400 fill-current" />
-              <span>Physical Ignition</span>
+            <div className="flex items-center justify-between mb-6">
+              <button
+                type="button"
+                onClick={() => setStage('do_button')}
+                className="text-xs text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                ← Back
+              </button>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold uppercase tracking-wider">
+                <Flame className="w-4 h-4 text-amber-400 fill-current" />
+                <span>Physical Ignition</span>
+              </div>
+              <span className="w-10" />
             </div>
 
             {(() => {
@@ -1111,6 +1212,13 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
               {/* Top offer badge */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStage('do_button')}
+                    className="text-xs text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                  >
+                    ← Back
+                  </button>
                   <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-bold">
                     Friction {currentAction.friction}/5
                   </span>
