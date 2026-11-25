@@ -103,7 +103,7 @@ interface Props {
 type DoStage = 'do_button' | 'ignition' | 'offer' | 'action_running';
 
 export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
-  const { settings, toggleTheme, boardData, toggleHabitDate, toggleQuickJob } = useMomentum();
+  const { settings, toggleTheme, boardData, toggleHabitDate, toggleQuickJob, reorderQuickJobs } = useMomentum();
 
   // Navigation / Modal States
   const [stage, setStage] = useState<DoStage>('do_button');
@@ -933,7 +933,7 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   };
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 overflow-hidden select-none">
+    <div className="h-[100dvh] w-screen bg-slate-950 text-slate-100 flex flex-col justify-between px-4 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+3rem)] sm:px-6 sm:pt-6 sm:pb-6 overflow-hidden select-none">
       {/* Top Bar */}
       <div className="flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-2">
@@ -986,13 +986,13 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
             )}
 
             {/* TOP / CENTER: Prominent DO Button */}
-            <div className="flex flex-col items-center justify-center shrink-0 py-1 sm:py-2">
+            <div className="flex flex-col items-center justify-center shrink-0 pt-6 pb-3 sm:pt-8 sm:pb-4">
               <div className="relative flex items-center justify-center">
-                <div className="absolute w-48 h-48 sm:w-64 sm:h-64 md:w-72 md:h-72 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
+                <div className="absolute w-44 h-44 sm:w-60 sm:h-60 md:w-64 md:h-64 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
 
                 <button
                   onClick={handleDoPress}
-                  className="relative w-40 h-40 sm:w-52 sm:h-52 md:w-56 md:h-56 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-5xl sm:text-6xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
+                  className="relative w-36 h-36 sm:w-48 sm:h-48 md:w-52 md:h-52 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-5xl sm:text-6xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
                 >
                   <span>DO</span>
                   <span className="text-[11px] sm:text-xs uppercase font-extrabold tracking-widest text-purple-200/90">
@@ -1002,9 +1002,13 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
               </div>
             </div>
 
-            {/* MIDDLE: Passive full-width ordered Tasks list (tap to expand) */}
+            {/* MIDDLE: Passive full-width ordered Tasks list (tap to expand, circle to complete, drag to reorder) */}
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <DoSideTaskList tasks={activeQuickTasks} />
+              <DoSideTaskList
+                tasks={activeQuickTasks}
+                onCompleteTask={toggleQuickJob}
+                onReorder={reorderQuickJobs}
+              />
             </div>
 
             {/* BOTTOM: Single-line horizontal scrolling Habits strip */}
@@ -1570,9 +1574,9 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
 
       {/* Bottom Bar: Action Layer branding, Experiment, Vault & theme toggle */}
       <div className="flex items-center justify-between text-[11px] text-slate-500 pb-1 px-1 shrink-0 gap-2">
-        <span className="hidden xs:inline text-[10px]">Focus Action Layer</span>
+        <span className="hidden sm:inline text-[10px]">Focus Action Layer</span>
 
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex items-center justify-center sm:justify-end flex-wrap gap-1.5 w-full sm:w-auto sm:ml-auto">
           {/* Plan Mode Button (Moved to bottom, directly left of Bench) */}
           {onOpenPlanMode && (
             <button

@@ -50,7 +50,7 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
   const habitsCount = boardData.habits.length;
 
   return (
-    <div className="h-screen max-h-screen w-screen overflow-hidden flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 selection:bg-purple-600 selection:text-white transition-colors">
+    <div className="h-[100dvh] max-h-[100dvh] w-screen overflow-hidden flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 selection:bg-purple-600 selection:text-white transition-colors">
       {/* Update notification banner if a new version is installed in background */}
       {updateAvailable && (
         <div className="bg-purple-600 text-white px-3 py-1.5 text-xs flex items-center justify-between z-50 shrink-0 shadow-md">
