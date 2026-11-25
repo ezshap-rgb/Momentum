@@ -14,6 +14,9 @@ import {
   flushGoogleTaskCompletionsAndDeletions,
   pushLocalTasksToGoogle,
   syncTasksIntoBoard,
+  updateGoogleTaskTitle,
+  syncTimingTagInHabitName,
+  inferHabitScheduleFromTitle,
   makeTitleFallbackOpId,
 } from '../googleTasksService';
 import { getDeletedGoogleTaskIds } from '../storageService';
@@ -841,6 +844,337 @@ describe('Google Tasks Write-Back Queue & Flush Sync', () => {
       expect(isAllClear).toBe(false);
       expect(updated.find((h) => h.habit_id === 'hab-am')?.isComplete).toBe(true);
       expect(updated.find((h) => h.habit_id === 'hab-pm')?.isComplete).toBe(false);
+    });
+  });
+
+  describe('3-Way Habit Sync across Google Tasks, Desktop & Mobile', () => {
+    it('syncTimingTagInHabitName and inferHabitScheduleFromTitle keep habit names and schedules aligned', () => {
+      expect(syncTimingTagInHabitName('Push-ups 50 (mrng)', 'Daily Night')).toBe('Push-ups 50 (night)');
+      expect(syncTimingTagInHabitName('Meditate 10', 'Daily Morning')).toBe('Meditate 10 (morning)');
+      expect(syncTimingTagInHabitName('Stretch 15 (morning)', 'Daily')).toBe('Stretch 15');
+
+      expect(inferHabitScheduleFromTitle('Stretch 15 (morning)')).toBe('Daily Morning');
+      expect(inferHabitScheduleFromTitle('Read 20 pages (night)')).toBe('Daily Night');
+      expect(inferHabitScheduleFromTitle('Squats 30')).toBe('Daily');
+    });
+
+    it('merges consecutive update ops preserving original title and never downgrading delete', () => {
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_1',
+        listId: 'habits_list',
+        action: 'update',
+        timestamp: 100,
+        title: 'Stretch 10',
+        newTitle: 'Stretch 15',
+        itemType: 'habit',
+      });
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_1',
+        listId: 'habits_list',
+        action: 'update',
+        timestamp: 200,
+        title: 'Stretch 15',
+        newTitle: 'Stretch 20 (night)',
+        itemType: 'habit',
+      });
+
+      let ops = getPendingGoogleTaskOps();
+      expect(ops).toHaveLength(1);
+      expect(ops[0]).toMatchObject({
+        taskId: 'hab_gt_1',
+        action: 'update',
+        title: 'Stretch 10',
+        newTitle: 'Stretch 20 (night)',
+        itemType: 'habit',
+      });
+
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_1',
+        listId: 'habits_list',
+        action: 'delete',
+        timestamp: 300,
+        title: 'Stretch 20 (night)',
+        itemType: 'habit',
+      });
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_1',
+        listId: 'habits_list',
+        action: 'update',
+        timestamp: 400,
+        title: 'Stretch 20 (night)',
+        newTitle: 'Should Not Downgrade',
+        itemType: 'habit',
+      });
+
+      ops = getPendingGoogleTaskOps();
+      expect(ops[0]).toMatchObject({
+        taskId: 'hab_gt_1',
+        action: 'delete',
+        title: 'Stretch 10',
+        itemType: 'habit',
+      });
+      expect(ops[0].newTitle).toBeUndefined();
+    });
+
+    it('updateGoogleTaskTitle sends PATCH { title } without touching notes or deleted IDs', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/lists/old_list/tasks/hab_missing') && init?.method === 'PATCH') {
+          return new Response('Not Found', { status: 404 });
+        }
+        if (url === 'https://tasks.googleapis.com/tasks/v1/users/@me/lists') {
+          return new Response(JSON.stringify({ items: [{ id: 'habits_list', title: 'Habits' }] }), { status: 200 });
+        }
+        if (url.includes('/lists/habits_list/tasks?')) {
+          return new Response(
+            JSON.stringify({
+              items: [{ id: 'hab_relocated', title: 'Read 10', status: 'needsAction', updated: '2026-11-25T10:00:00Z' }],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.endsWith('/lists/habits_list/tasks/hab_relocated') && init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const ok = await updateGoogleTaskTitle('tok_upd', 'old_list', 'hab_missing', 'Read 20 (night)', 'Read 10', 'habit');
+      expect(ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://tasks.googleapis.com/tasks/v1/lists/habits_list/tasks/hab_relocated',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ title: 'Read 20 (night)' }),
+        })
+      );
+      expect(getDeletedGoogleTaskIds().has('hab_relocated')).toBe(false);
+    });
+
+    it('flushGoogleTaskCompletionsAndDeletions flushes habit title updates while blocking habit completions', async () => {
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_1',
+        listId: 'habits_list',
+        action: 'update',
+        timestamp: 100,
+        title: 'Push-ups 50 (mrng)',
+        newTitle: 'Push-ups 60 (morning)',
+        itemType: 'habit',
+      });
+      enqueuePendingGoogleTaskOp({
+        taskId: 'hab_gt_2',
+        listId: 'habits_list',
+        action: 'complete',
+        timestamp: 110,
+        itemType: 'habit',
+      });
+
+      const boardData = makeEmptyBoard({
+        habits: [
+          {
+            id: 'gt-hab-1',
+            name: 'Push-ups 60 (morning)',
+            type: 'boolean',
+            target: 60,
+            next_due: 'Daily Morning',
+            log: {},
+            googleTaskId: 'hab_gt_1',
+            googleTaskListId: 'habits_list',
+          },
+          {
+            id: 'gt-hab-2',
+            name: 'Squats 30',
+            type: 'boolean',
+            target: 30,
+            next_due: 'Daily',
+            log: {},
+            googleTaskId: 'hab_gt_2',
+            googleTaskListId: 'habits_list',
+          },
+        ],
+      });
+
+      const activeTaskLists = [
+        {
+          listId: 'habits_list',
+          listTitle: 'Habits',
+          tasks: [
+            { id: 'hab_gt_1', title: 'Push-ups 50 (mrng)', status: 'needsAction' as const, updated: '2026-11-25T10:00:00Z' },
+            { id: 'hab_gt_2', title: 'Squats 30', status: 'needsAction' as const, updated: '2026-11-25T10:00:00Z' },
+          ],
+        },
+      ];
+
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('Unexpected', { status: 500 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await flushGoogleTaskCompletionsAndDeletions('tok_flush_hab', boardData, activeTaskLists);
+
+      expect(res.updatedCount).toBe(1);
+      expect(res.completedCount).toBe(0);
+      expect(res.deletedCount).toBe(0);
+      expect(res.flushedTaskIds.size).toBe(0);
+      expect(activeTaskLists[0].tasks[0].title).toBe('Push-ups 60 (morning)');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://tasks.googleapis.com/tasks/v1/lists/habits_list/tasks/hab_gt_1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ title: 'Push-ups 60 (morning)' }),
+        })
+      );
+      expect(getPendingGoogleTaskOps()).toEqual([]);
+    });
+
+    it('pushLocalTasksToGoogle pushes user-created local habits once without duplicating remote habits or pushing seeds', async () => {
+      const boardData = makeEmptyBoard({
+        habits: [
+          {
+            id: 'hab-1',
+            name: 'Push-ups 50 (mrng)',
+            type: 'boolean',
+            target: 50,
+            next_due: 'Daily Morning',
+            log: {},
+            createdAt: Date.now(),
+          },
+          {
+            id: 'hab-legacy',
+            name: 'Legacy Uncreated',
+            type: 'boolean',
+            target: 10,
+            next_due: 'Daily',
+            log: {},
+          },
+          {
+            id: 'hab-dup-remote',
+            name: 'Read 15',
+            type: 'boolean',
+            target: 15,
+            next_due: 'Daily Night',
+            log: {},
+            createdAt: Date.now(),
+          },
+          {
+            id: 'hab-user-new',
+            name: 'Stretch 10',
+            type: 'boolean',
+            target: 10,
+            next_due: 'Daily Night',
+            log: {},
+            createdAt: Date.now(),
+          },
+        ],
+      });
+
+      const createdCalls: Array<{ url: string; title: string }> = [];
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        createdCalls.push({ url, title: body.title });
+        return new Response(JSON.stringify({ id: 'gt_created_hab' }), { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await pushLocalTasksToGoogle(
+        'tok_push_hab',
+        boardData,
+        {
+          tasksListId: 'tasks_list',
+          quickJobsListId: 'tasks_list',
+          jobsListId: 'jobs_list',
+          responsibilitiesListId: 'jobs_list',
+          projectsListId: 'projects_list',
+          habitsListId: 'habits_list',
+        },
+        [
+          {
+            listId: 'habits_list',
+            listTitle: 'Habits',
+            tasks: [
+              { id: 'gt_existing_read', title: 'Read 15 (night)', status: 'needsAction', updated: '2026-11-25T10:00:00Z' },
+            ],
+          },
+        ]
+      );
+
+      expect(res.pushedCount).toBe(1);
+      expect(createdCalls).toEqual([
+        {
+          url: 'https://tasks.googleapis.com/tasks/v1/lists/habits_list/tasks',
+          title: 'Stretch 10 (night)',
+        },
+      ]);
+      const pushedHabit = res.updatedBoard.habits.find((h) => h.id === 'hab-user-new');
+      expect(pushedHabit?.googleTaskId).toBe('gt_created_hab');
+      expect(pushedHabit?.googleTaskListId).toBe('habits_list');
+      expect(pushedHabit?.name).toBe('Stretch 10 (night)');
+    });
+
+    it('syncTasksIntoBoard pulls remote habit edits while preserving logs and prunes habits deleted in Google Tasks', () => {
+      const boardData = makeEmptyBoard({
+        habits: [
+          {
+            id: 'gt-hab-1',
+            name: 'Squats 30',
+            type: 'boolean',
+            target: 30,
+            next_due: 'Daily',
+            log: { '2026-11-24': true },
+            googleTaskId: 'gt_hab_edit',
+            googleTaskListId: 'habits_list',
+          },
+          {
+            id: 'gt-hab-deleted',
+            name: 'Removed Remotely',
+            type: 'boolean',
+            target: 10,
+            next_due: 'Daily',
+            log: { '2026-11-24': true },
+            googleTaskId: 'gt_hab_gone',
+            googleTaskListId: 'habits_list',
+          },
+        ],
+      });
+
+      const taskLists = [
+        {
+          listId: 'habits_list',
+          listTitle: 'Habits',
+          tasks: [
+            {
+              id: 'gt_hab_edit',
+              title: 'Squats 40 (night)',
+              status: 'needsAction' as const,
+              updated: '2026-11-25T10:00:00Z',
+            },
+          ],
+        },
+      ];
+
+      const res = syncTasksIntoBoard(boardData, taskLists, false, undefined, {
+        tasksListId: 'tasks_list',
+        quickJobsListId: 'tasks_list',
+        jobsListId: 'jobs_list',
+        responsibilitiesListId: 'jobs_list',
+        projectsListId: 'projects_list',
+        habitsListId: 'habits_list',
+      });
+
+      expect(res.removedTasks).toBe(1);
+      expect(res.updatedBoard.habits).toHaveLength(1);
+      expect(res.updatedBoard.habits[0]).toMatchObject({
+        id: 'gt-hab-1',
+        name: 'Squats 40 (night)',
+        target: 40,
+        next_due: 'Daily Night',
+        log: { '2026-11-24': true },
+        googleTaskId: 'gt_hab_edit',
+      });
     });
   });
 });

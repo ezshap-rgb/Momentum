@@ -62,6 +62,7 @@ export interface Habit {
   target: number; // 1 for boolean, minutes for duration
   next_due?: string | null; // e.g. "Tonight by 11:30 PM", "Daily 8:00 AM"
   log: Record<string, boolean | number>; // YYYY-MM-DD -> value
+  createdAt?: number;
   googleTaskId?: string;
   googleTaskListId?: string;
 }

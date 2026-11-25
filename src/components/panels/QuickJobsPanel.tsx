@@ -8,25 +8,52 @@ import {
   Plus,
   Trash2,
   ChevronDown,
+  ChevronUp,
+  GripVertical,
   Maximize2,
   Minimize2,
   Pencil,
 } from 'lucide-react';
 
 export const QuickJobsPanel: React.FC = () => {
-  const { boardData, addQuickJob, toggleQuickJob, deleteQuickJob, editQuickJob, panelStates, cyclePanelLevel } =
+  const { boardData, addQuickJob, toggleQuickJob, deleteQuickJob, editQuickJob, reorderQuickJobs, panelStates, cyclePanelLevel } =
     useMomentum();
 
   const [newTitle, setNewTitle] = useState('');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const level = panelStates.quick_jobs; // 'collapsed' | 'compact' | 'expanded'
 
   const activeJobs = boardData.quick_jobs.filter((j) => !j.done);
   const completedJobs = boardData.quick_jobs.filter((j) => j.done);
+
+  const moveByIndex = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= activeJobs.length || fromIdx === toIdx) return;
+    const nextIds = activeJobs.map((j) => j.id);
+    const [moved] = nextIds.splice(fromIdx, 1);
+    nextIds.splice(toIdx, 0, moved);
+    reorderQuickJobs(nextIds);
+  };
+
+  const handleDrop = (targetId: string) => {
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const fromIdx = activeJobs.findIndex((j) => j.id === draggedId);
+    const toIdx = activeJobs.findIndex((j) => j.id === targetId);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      moveByIndex(fromIdx, toIdx);
+    }
+    setDraggedId(null);
+    setDragOverId(null);
+  };
 
   const handleAdd = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -148,23 +175,52 @@ export const QuickJobsPanel: React.FC = () => {
               </p>
             )}
 
-            {activeJobs.map((job) => {
+            {activeJobs.map((job, idx) => {
               const isEditing = editingJobId === job.id;
               const isExpanded = expandedJobId === job.id;
+              const isDragged = draggedId === job.id;
+              const isDropTarget = dragOverId === job.id && draggedId !== job.id;
 
               return (
                 <div
                   key={job.id}
+                  draggable={!isEditing}
+                  onDragStart={(e) => {
+                    if (isEditing) return;
+                    setDraggedId(job.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', job.id);
+                  }}
+                  onDragOver={(e) => {
+                    if (isEditing) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverId !== job.id) setDragOverId(job.id);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverId === job.id) setDragOverId(null);
+                  }}
+                  onDrop={(e) => {
+                    if (isEditing) return;
+                    e.preventDefault();
+                    handleDrop(job.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedId(null);
+                    setDragOverId(null);
+                  }}
                   onClick={() => {
                     if (!isEditing) {
                       setExpandedJobId(isExpanded ? null : job.id);
                     }
                   }}
                   className={`group p-2 rounded-xl border transition cursor-pointer select-text ${
-                    isExpanded || isEditing
+                    isDropTarget
+                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/45 shadow-xs'
+                      : isExpanded || isEditing
                       ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 shadow-xs'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-850 border-slate-100 dark:border-slate-800/60'
-                  }`}
+                  } ${isDragged ? 'opacity-45' : ''}`}
                   title={isEditing ? '' : isExpanded ? 'Click to collapse' : 'Click to view full entry / edit'}
                 >
                   {isEditing ? (
@@ -221,7 +277,14 @@ export const QuickJobsPanel: React.FC = () => {
                   ) : (
                     /* Display Mode: Click to view whole entry (no cutoff); ONLY circle marks done */
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2 min-w-0 flex-1">
+                      <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                        <span
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5 text-slate-300 dark:text-slate-600 group-hover:text-slate-500 dark:group-hover:text-slate-400 cursor-grab active:cursor-grabbing shrink-0 hidden sm:inline-flex"
+                          title="Drag to reorder"
+                        >
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </span>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -242,7 +305,27 @@ export const QuickJobsPanel: React.FC = () => {
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => moveByIndex(idx, idx - 1)}
+                          disabled={idx === 0}
+                          className="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-20 disabled:pointer-events-none transition"
+                          title="Move up"
+                          aria-label={`Move ${job.title} up`}
+                        >
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveByIndex(idx, idx + 1)}
+                          disabled={idx === activeJobs.length - 1}
+                          className="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-20 disabled:pointer-events-none transition"
+                          title="Move down"
+                          aria-label={`Move ${job.title} down`}
+                        >
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => startEditing(job)}

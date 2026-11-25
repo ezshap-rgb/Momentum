@@ -238,9 +238,10 @@ const PENDING_GTASKS_OPS_KEY = 'momentum_pending_gtasks_ops_v1';
 export interface PendingGoogleTaskOp {
   taskId: string;
   listId: string;
-  action: 'complete' | 'delete';
+  action: 'complete' | 'delete' | 'update';
   timestamp: number;
   title?: string;
+  newTitle?: string;
   itemType?: 'quick' | 'resp' | 'proj' | 'habit';
 }
 
@@ -256,7 +257,7 @@ export function getPendingGoogleTaskOps(): PendingGoogleTaskOp[] {
             typeof op.taskId === 'string' &&
             op.taskId.trim().length > 0 &&
             !op.taskId.includes(' ') &&
-            (op.action === 'complete' || op.action === 'delete')
+            (op.action === 'complete' || op.action === 'delete' || op.action === 'update')
         );
       }
     }
@@ -275,18 +276,46 @@ export function enqueuePendingGoogleTaskOp(op: PendingGoogleTaskOp): void {
       action: op.action,
       timestamp: op.timestamp || Date.now(),
       ...(op.title ? { title: op.title } : {}),
+      ...(op.newTitle ? { newTitle: op.newTitle } : {}),
       ...(op.itemType ? { itemType: op.itemType } : {}),
     };
     if (idx >= 0) {
       const existing = ops[idx];
-      const mergedTitle = normalizedOp.title || existing.title;
+      const resolvedAction: PendingGoogleTaskOp['action'] =
+        existing.action === 'delete' ? 'delete' : normalizedOp.action;
       const mergedItemType = normalizedOp.itemType || existing.itemType;
-      ops[idx] = {
-        ...normalizedOp,
-        action: existing.action === 'delete' ? 'delete' : normalizedOp.action,
-        ...(mergedTitle ? { title: mergedTitle } : {}),
-        ...(mergedItemType ? { itemType: mergedItemType } : {}),
-      };
+
+      if (resolvedAction === 'delete') {
+        const mergedTitle = existing.title || normalizedOp.title;
+        const nextOp: PendingGoogleTaskOp = {
+          taskId: normalizedOp.taskId,
+          listId: normalizedOp.listId,
+          action: 'delete',
+          timestamp: normalizedOp.timestamp,
+          ...(mergedTitle ? { title: mergedTitle } : {}),
+          ...(mergedItemType ? { itemType: mergedItemType } : {}),
+        };
+        ops[idx] = nextOp;
+      } else if (resolvedAction === 'update' && existing.action === 'update') {
+        // Preserve original remote title for fallback matching while taking latest newTitle
+        const mergedTitle = existing.title || normalizedOp.title;
+        const mergedNewTitle = normalizedOp.newTitle || existing.newTitle;
+        ops[idx] = {
+          ...normalizedOp,
+          action: 'update',
+          ...(mergedTitle ? { title: mergedTitle } : {}),
+          ...(mergedNewTitle ? { newTitle: mergedNewTitle } : {}),
+          ...(mergedItemType ? { itemType: mergedItemType } : {}),
+        };
+      } else {
+        const mergedTitle = normalizedOp.title || existing.title;
+        ops[idx] = {
+          ...normalizedOp,
+          action: resolvedAction,
+          ...(mergedTitle ? { title: mergedTitle } : {}),
+          ...(mergedItemType ? { itemType: mergedItemType } : {}),
+        };
+      }
     } else {
       ops.push(normalizedOp);
     }
@@ -363,6 +392,12 @@ export function loadLocalBoardData(): MomentumBoardData {
           const existing = seenHabits.get(norm);
           if (h.log) {
             existing.log = { ...existing.log, ...h.log };
+          }
+          if (!existing.googleTaskId && h.googleTaskId) {
+            existing.googleTaskId = h.googleTaskId;
+          }
+          if (!existing.googleTaskListId && h.googleTaskListId) {
+            existing.googleTaskListId = h.googleTaskListId;
           }
         }
       }

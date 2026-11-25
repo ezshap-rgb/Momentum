@@ -198,7 +198,7 @@ export function syncHabitsWithBoardData(
 ): HabitItem[] {
   const today = getTodayDateString();
 
-  if (boardHabits && boardHabits.length > 0) {
+  if (Array.isArray(boardHabits)) {
     const updated = boardHabits.map((bh) => {
       const todayVal = bh.log ? bh.log[today] : undefined;
       const isDoneToday = Boolean(

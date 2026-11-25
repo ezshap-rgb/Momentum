@@ -421,6 +421,50 @@ export function normalizeHabitName(name: string): string {
     .trim();
 }
 
+export function inferHabitScheduleFromTitle(title: string): 'Daily Morning' | 'Daily Night' | 'Daily' {
+  const s = (title || '').trim();
+  if (/\b(?:mrng|morning|am)\b/i.test(s)) return 'Daily Morning';
+  if (/\b(?:nt|night|evening|pm)\b/i.test(s)) return 'Daily Night';
+  return 'Daily';
+}
+
+export function syncTimingTagInHabitName(name: string, nextDue?: string | null): string {
+  let clean = (name || '').trim();
+  if (!clean) return '';
+
+  const sched = (nextDue || '').toLowerCase();
+  const wantsMorning = /\b(?:mrng|morning|am)\b/i.test(sched);
+  const wantsNight = !wantsMorning && /\b(?:nt|night|evening|pm)\b/i.test(sched);
+  const wantsPlainDaily = !wantsMorning && !wantsNight && /\bdaily\b/i.test(sched);
+
+  if (wantsMorning) {
+    clean = clean
+      .replace(/\s*\((?:nt|night|evening)\)\s*/gi, ' ')
+      .replace(/\s+(?:nt|night|evening)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!/\b(?:mrng|morning|am)\b/i.test(clean)) {
+      clean = `${clean} (morning)`;
+    }
+  } else if (wantsNight) {
+    clean = clean
+      .replace(/\s*\((?:mrng|morning)\)\s*/gi, ' ')
+      .replace(/\s+(?:mrng|morning)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!/\b(?:nt|night|evening|pm)\b/i.test(clean)) {
+      clean = `${clean} (night)`;
+    }
+  } else if (wantsPlainDaily) {
+    clean = clean
+      .replace(/\s*\((?:mrng|morning|nt|night|evening)\)\s*/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return clean.replace(/\s+/g, ' ').trim();
+}
+
 export type GoogleTaskItemType = 'quick' | 'resp' | 'proj' | 'habit';
 
 export function normalizeGoogleTaskTitleForMatch(rawTitle: string): string {
@@ -695,9 +739,12 @@ export function syncTasksIntoBoard(
     return true;
   });
 
-  // Habits are persistent templates for daily tracking.
-  // They are never pruned when their Google Tasks are completed.
-  const habits = [...boardData.habits];
+  // Build active habit names and detect whether Habits list is included in payload
+  const hasHabitsListInPayload = taskLists.some(
+    (l) =>
+      (dedicatedLists?.habitsListId && l.listId === dedicatedLists.habitsListId) ||
+      /habit/i.test(l.listTitle || '')
+  );
 
   // Track active habit names already inside the Habits list to avoid duplicating stray "Habit:" relocations
   const existingHabitsListNames = new Set<string>();
@@ -712,6 +759,38 @@ export function syncTasksIntoBoard(
       }
     }
   }
+
+  // Habits are persistent daily definitions across devices & Google Tasks:
+  // prune only when deleted remotely (when Habits list is present) or explicitly deleted locally.
+  const habits: Habit[] = boardData.habits.filter((h) => {
+    if (h.googleTaskId && deletedTaskIds.has(h.googleTaskId)) {
+      removedTasks++;
+      return false;
+    }
+
+    if (isProtectedFromPruning(h.createdAt, h.googleTaskId, h.id)) {
+      return true;
+    }
+
+    if (hasHabitsListInPayload) {
+      if ((h.googleTaskId || h.id.startsWith('gt-hab-')) && (!h.googleTaskId || !activeGoogleTasks.has(h.googleTaskId))) {
+        removedTasks++;
+        return false;
+      }
+
+      if (
+        /^hab-[1-8]$/.test(h.id) &&
+        !h.googleTaskId &&
+        existingHabitsListNames.size > 0 &&
+        !existingHabitsListNames.has(normalizeHabitName(h.name))
+      ) {
+        removedTasks++;
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   for (const { listId, listTitle, tasks } of taskLists) {
     const listName = listTitle || '';
@@ -920,17 +999,13 @@ export function syncTasksIntoBoard(
           });
         }
 
-        const existing = habits.find((h) => {
+        const existingIdx = habits.findIndex((h) => {
           if (taskId && h.googleTaskId === taskId) return true;
           return normalizeHabitName(h.name) === normHabitName;
         });
 
-        if (!existing) {
-          const inferredDue = /\b(?:mrng|morning|am)\b/i.test(habitName)
-            ? 'Daily Morning'
-            : /\b(?:nt|night|evening|pm)\b/i.test(habitName)
-            ? 'Daily Night'
-            : 'Daily';
+        if (existingIdx === -1) {
+          const inferredDue = inferHabitScheduleFromTitle(habitName);
           const numMatch = habitName.match(/\b(\d+)\b/);
           const inferredTarget = numMatch ? parseInt(numMatch[1], 10) : 1;
 
@@ -946,14 +1021,24 @@ export function syncTasksIntoBoard(
           });
           addedHabits++;
         } else {
+          const existing = { ...habits[existingIdx], log: { ...habits[existingIdx].log } };
           if (isHabitList || !existing.googleTaskId) {
             existing.googleTaskId = taskId;
             existing.googleTaskListId = listId;
+          }
+          if (existing.name !== habitName) {
+            existing.name = habitName;
+            existing.next_due = inferHabitScheduleFromTitle(habitName);
+            const numMatch = habitName.match(/\b(\d+)\b/);
+            if (numMatch) {
+              existing.target = parseInt(numMatch[1], 10);
+            }
           }
           if (task.status === 'completed') {
             const todayStr = getTodayDateString();
             existing.log[todayStr] = true;
           }
+          habits[existingIdx] = existing;
         }
         continue;
       }
@@ -1165,7 +1250,9 @@ async function sendGoogleTaskMutation(
 
       const retryRes = await executeMutation(titleMatch.listId, titleMatch.task.id);
       if (retryRes.ok || (method === 'DELETE' && retryRes.status === 204)) {
-        recordDeletedGoogleTaskId(titleMatch.task.id);
+        if (method === 'DELETE' || body?.status === 'completed') {
+          recordDeletedGoogleTaskId(titleMatch.task.id);
+        }
         return true;
       }
       if (retryRes.status === 401) {
@@ -1222,7 +1309,9 @@ async function sendGoogleTaskMutation(
         if (titleMatch) {
           const titleRetryRes = await executeMutation(titleMatch.listId, titleMatch.task.id);
           if (titleRetryRes.ok || (method === 'DELETE' && titleRetryRes.status === 204)) {
-            recordDeletedGoogleTaskId(titleMatch.task.id);
+            if (method === 'DELETE' || body?.status === 'completed') {
+              recordDeletedGoogleTaskId(titleMatch.task.id);
+            }
             return true;
           }
           if (titleRetryRes.status === 401) {
@@ -1314,7 +1403,34 @@ export async function deleteGoogleTask(
 }
 
 /**
- * Flushes pending completions/deletions and retroactively completes any active Google Tasks
+ * Update a task's title on Google Tasks (never modifies notes).
+ */
+export async function updateGoogleTaskTitle(
+  accessToken: string,
+  listId: string,
+  taskId: string,
+  newTitle: string,
+  fallbackOldTitle?: string,
+  itemType?: GoogleTaskItemType,
+  excludeTaskIds?: Set<string>
+): Promise<boolean> {
+  const cleanTitle = newTitle.trim();
+  if (!cleanTitle) return false;
+  return sendGoogleTaskMutation(
+    accessToken,
+    listId,
+    taskId,
+    'PATCH',
+    { title: cleanTitle },
+    false,
+    fallbackOldTitle,
+    itemType,
+    excludeTaskIds
+  );
+}
+
+/**
+ * Flushes pending completions/deletions/title-updates and retroactively completes any active Google Tasks
  * that are already marked done locally or recorded in momentum_deleted_gtasks_v1.
  */
 export async function flushGoogleTaskCompletionsAndDeletions(
@@ -1324,11 +1440,13 @@ export async function flushGoogleTaskCompletionsAndDeletions(
 ): Promise<{
   completedCount: number;
   deletedCount: number;
+  updatedCount: number;
   flushedTaskIds: Set<string>;
   errors: string[];
 }> {
   let completedCount = 0;
   let deletedCount = 0;
+  let updatedCount = 0;
   const flushedTaskIds = new Set<string>();
   const errors: string[] = [];
 
@@ -1350,10 +1468,11 @@ export async function flushGoogleTaskCompletionsAndDeletions(
     string,
     {
       listId: string;
-      action: 'complete' | 'delete';
+      action: 'complete' | 'delete' | 'update';
       fromPendingQueue: boolean;
       pendingOpKey?: string;
       title?: string;
+      newTitle?: string;
       itemType?: GoogleTaskItemType;
     }
   >();
@@ -1368,6 +1487,48 @@ export async function flushGoogleTaskCompletionsAndDeletions(
       removePendingGoogleTaskOp(op.taskId);
       continue;
     }
+
+    if (op.action === 'update') {
+      if (!op.newTitle || !op.newTitle.trim()) {
+        removePendingGoogleTaskOp(op.taskId);
+        continue;
+      }
+
+      if (!op.taskId.startsWith('title:') && activeTaskMap.has(op.taskId)) {
+        opsToRun.set(op.taskId, {
+          listId: activeTaskMap.get(op.taskId)!,
+          action: 'update',
+          fromPendingQueue: true,
+          pendingOpKey: op.taskId,
+          title: op.title,
+          newTitle: op.newTitle.trim(),
+          itemType: op.itemType,
+        });
+      } else if (op.title) {
+        const excludeOthers = new Set(activeLocalIds);
+        if (!op.taskId.startsWith('title:')) {
+          excludeOthers.delete(op.taskId);
+        }
+        const titleMatch = findActiveGoogleTaskByTitle(activeTaskLists, op.title, op.itemType, excludeOthers);
+        if (titleMatch) {
+          opsToRun.set(titleMatch.task.id, {
+            listId: titleMatch.listId,
+            action: 'update',
+            fromPendingQueue: true,
+            pendingOpKey: op.taskId,
+            title: op.title,
+            newTitle: op.newTitle.trim(),
+            itemType: op.itemType,
+          });
+        } else {
+          removePendingGoogleTaskOp(op.taskId);
+        }
+      } else {
+        removePendingGoogleTaskOp(op.taskId);
+      }
+      continue;
+    }
+
     if (!op.taskId.startsWith('title:') && activeTaskMap.has(op.taskId)) {
       opsToRun.set(op.taskId, {
         listId: activeTaskMap.get(op.taskId)!,
@@ -1466,16 +1627,30 @@ export async function flushGoogleTaskCompletionsAndDeletions(
 
   // 3. Execute remote updates
   const hadStoredToken = !!getStoredAccessToken();
-  for (const [taskId, { listId, action, fromPendingQueue, pendingOpKey, title, itemType }] of opsToRun.entries()) {
+  for (const [taskId, { listId, action, fromPendingQueue, pendingOpKey, title, newTitle, itemType }] of opsToRun.entries()) {
     const ok =
-      action === 'delete'
+      action === 'update'
+        ? await updateGoogleTaskTitle(accessToken, listId, taskId, newTitle || '', title, itemType, activeLocalIds)
+        : action === 'delete'
         ? await deleteGoogleTask(accessToken, listId, taskId, title, itemType, activeLocalIds)
         : await markGoogleTaskCompleted(accessToken, listId, taskId, title, itemType, activeLocalIds);
 
     if (ok) {
-      flushedTaskIds.add(taskId);
-      if (action === 'delete') deletedCount++;
-      else completedCount++;
+      if (action === 'update') {
+        updatedCount++;
+        // Update in-memory activeTaskLists so subsequent syncTasksIntoBoard sees the updated title
+        if (newTitle) {
+          for (const l of activeTaskLists) {
+            if (l.listId !== listId) continue;
+            const matched = l.tasks.find((t) => t.id === taskId);
+            if (matched) matched.title = newTitle;
+          }
+        }
+      } else {
+        flushedTaskIds.add(taskId);
+        if (action === 'delete') deletedCount++;
+        else completedCount++;
+      }
 
       if (fromPendingQueue) {
         removePendingGoogleTaskOp(pendingOpKey || taskId);
@@ -1485,7 +1660,7 @@ export async function flushGoogleTaskCompletionsAndDeletions(
       }
     } else {
       errors.push(`Failed to ${action} Google Task ${taskId} in list ${listId}`);
-      if (!fromPendingQueue) {
+      if (!fromPendingQueue && action !== 'update') {
         enqueuePendingGoogleTaskOp({
           taskId,
           listId,
@@ -1499,7 +1674,7 @@ export async function flushGoogleTaskCompletionsAndDeletions(
     }
   }
 
-  return { completedCount, deletedCount, flushedTaskIds, errors };
+  return { completedCount, deletedCount, updatedCount, flushedTaskIds, errors };
 }
 
 /**
@@ -1546,12 +1721,13 @@ export async function createGoogleTask(
 }
 
 /**
- * Two-way upload: Pushes newly created local tasks to Google Tasks so all devices receive them.
+ * Two-way upload: Pushes newly created local tasks (and user-created local habits) to Google Tasks so all devices receive them.
  */
 export async function pushLocalTasksToGoogle(
   accessToken: string,
   boardData: MomentumBoardData,
-  targetLists?: DedicatedTaskLists | string
+  targetLists?: DedicatedTaskLists | string,
+  existingActiveLists?: { listId: string; listTitle?: string; tasks: GoogleTaskItem[] }[]
 ): Promise<{
   updatedBoard: MomentumBoardData;
   pushedCount: number;
@@ -1664,7 +1840,47 @@ export async function pushLocalTasksToGoogle(
     }
   }
 
-  // 4. Habits: persistent templates in Google Tasks are never auto-created or duplicated on sync.
+  // 4. Habits: push newly created user habits (with createdAt, never starter seeds hab-1..hab-8) once without duplicating remote habits
+  const habitsListId = listConfig.habitsListId || '@default';
+  const remoteHabitNames = new Set<string>();
+  for (const l of existingActiveLists || []) {
+    const isHabitList = /habit/i.test(l.listTitle || '') || l.listId === habitsListId;
+    for (const t of l.tasks) {
+      if (!t || t.deleted || t.status === 'completed' || t.hidden || !t.title) continue;
+      if (isHabitList || /^habit(?::|\s+-)/i.test(t.title.trim())) {
+        remoteHabitNames.add(normalizeHabitName(t.title));
+      }
+    }
+  }
+
+  for (let i = 0; i < updatedHabits.length; i++) {
+    const habit = updatedHabits[i];
+    if (habit.googleTaskId || !habit.createdAt || /^hab-[1-8]$/.test(habit.id)) {
+      continue;
+    }
+
+    const cleanTitle = syncTimingTagInHabitName(habit.name, habit.next_due);
+    const normName = normalizeHabitName(cleanTitle);
+    if (!normName || remoteHabitNames.has(normName)) continue;
+
+    try {
+      const remoteTitle = habitsListId === '@default' ? `Habit: ${cleanTitle}` : cleanTitle;
+      const taskId = await createGoogleTask(accessToken, habitsListId, remoteTitle);
+      if (taskId) {
+        updatedHabits[i] = {
+          ...habit,
+          name: cleanTitle,
+          googleTaskId: taskId,
+          googleTaskListId: habitsListId,
+        };
+        remoteHabitNames.add(normName);
+        pushedTaskIds.push(taskId);
+        pushedCount++;
+      }
+    } catch (err: any) {
+      errors.push(`Habit "${habit.name}": ${err?.message || err}`);
+    }
+  }
 
   return {
     updatedBoard: {

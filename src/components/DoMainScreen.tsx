@@ -105,7 +105,7 @@ interface Props {
 type DoStage = 'do_button' | 'ignition' | 'offer' | 'action_running';
 
 export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
-  const { settings, toggleTheme, boardData, toggleHabitDate, toggleQuickJob, reorderQuickJobs } = useMomentum();
+  const { settings, toggleTheme, boardData, toggleHabitDate, toggleQuickJob } = useMomentum();
 
   // Navigation / Modal States
   const [stage, setStage] = useState<DoStage>('do_button');
@@ -986,11 +986,11 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         </div>
       </div>
 
-      {/* STAGE 1: CENTRAL DO BUTTON + LEFT ORDERED TASKS + RIGHT HABITS */}
+      {/* STAGE 1: CENTRAL DO BUTTON + FULL-WIDTH TASKS + HORIZONTAL HABITS STRIP */}
       {stage === 'do_button' && !showConfig && (() => {
         const activeQuickTasks = boardData.quick_jobs.filter((j) => !j.done);
         return (
-          <div className="flex-1 min-h-0 w-full max-w-6xl mx-auto flex flex-col md:grid md:grid-cols-[minmax(220px,280px)_1fr_minmax(220px,280px)] gap-3 sm:gap-4 py-2 overflow-hidden relative">
+          <div className="flex-1 min-h-0 w-full max-w-3xl mx-auto flex flex-col gap-2.5 sm:gap-3 py-1 sm:py-2 overflow-hidden relative">
             {allClearCelebration && (
               <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium flex items-center gap-2 backdrop-blur-md animate-fadeIn shadow-lg shadow-amber-950/40 whitespace-nowrap">
                 <Sparkles className="w-4 h-4 text-amber-400" />
@@ -998,14 +998,14 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
               </div>
             )}
 
-            {/* CENTER: Prominent DO Button (top on mobile, middle column on desktop) */}
-            <div className="order-1 md:order-2 flex flex-col items-center justify-center shrink-0 md:shrink py-2 md:my-auto">
+            {/* TOP / CENTER: Prominent DO Button */}
+            <div className="flex flex-col items-center justify-center shrink-0 py-1 sm:py-2">
               <div className="relative flex items-center justify-center">
-                <div className="absolute w-52 h-52 sm:w-72 sm:h-72 md:w-80 md:h-80 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
+                <div className="absolute w-48 h-48 sm:w-64 sm:h-64 md:w-72 md:h-72 bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 rounded-full blur-2xl animate-glow-pulse pointer-events-none"></div>
 
                 <button
                   onClick={handleDoPress}
-                  className="relative w-44 h-44 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-5xl sm:text-6xl md:text-7xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
+                  className="relative w-40 h-40 sm:w-52 sm:h-52 md:w-56 md:h-56 rounded-full bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-800 hover:from-purple-400 hover:to-indigo-700 active:scale-95 text-white font-black text-5xl sm:text-6xl tracking-wider shadow-2xl flex flex-col items-center justify-center gap-1 border-4 border-purple-300/40 animate-do-breathe cursor-pointer transition"
                 >
                   <span>DO</span>
                   <span className="text-[11px] sm:text-xs uppercase font-extrabold tracking-widest text-purple-200/90">
@@ -1015,30 +1015,29 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
               </div>
 
               {activeQuickTasks.length > 0 && (
-                <div className="mt-3 sm:mt-4 max-w-[260px] text-center">
+                <div className="mt-2 sm:mt-3 max-w-md w-full px-4 text-center truncate">
                   <span className="text-[11px] text-slate-500">Up next: </span>
-                  <span className="text-[11px] text-slate-300/90 font-medium truncate inline-block max-w-[190px] align-bottom">
+                  <span className="text-[11px] text-slate-300/90 font-medium">
                     {activeQuickTasks[0].title}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* LEFT Tasks (Ordered) + RIGHT Habits */}
-            <div className="order-2 md:contents flex-1 min-h-0 grid grid-cols-2 gap-2 overflow-hidden">
-              <div className="md:order-1 min-h-0 flex flex-col overflow-hidden">
-                <DoSideTaskList
-                  tasks={activeQuickTasks}
-                  onReorder={reorderQuickJobs}
-                  onCompleteTask={toggleQuickJob}
-                />
-              </div>
-              <div className="md:order-3 min-h-0 flex flex-col overflow-hidden">
-                <DoSideHabitList
-                  habits={habits}
-                  onDismiss={handleDismissHabit}
-                />
-              </div>
+            {/* MIDDLE: Full-width Tasks list (tap to expand) */}
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <DoSideTaskList
+                tasks={activeQuickTasks}
+                onCompleteTask={toggleQuickJob}
+              />
+            </div>
+
+            {/* BOTTOM: Single-line horizontal scrolling Habits strip */}
+            <div className="shrink-0">
+              <DoSideHabitList
+                habits={habits}
+                onDismiss={handleDismissHabit}
+              />
             </div>
           </div>
         );
