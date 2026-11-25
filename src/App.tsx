@@ -5,7 +5,6 @@ import { QuickJobsPanel } from './components/panels/QuickJobsPanel';
 import { BiggerJobsPanel } from './components/panels/BiggerJobsPanel';
 import { ProjectsPanel } from './components/panels/ProjectsPanel';
 import { HabitsPanel } from './components/panels/HabitsPanel';
-import { HabitsModal } from './components/HabitsModal';
 import { CalendarPanel } from './components/CalendarPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { VoiceIngestionModal } from './components/VoiceIngestionModal';
@@ -17,7 +16,6 @@ import { Zap, Activity, Layers, Compass, Mic, Undo2, X } from 'lucide-react';
 function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () => void; onOpenPlanMode?: () => void }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVoiceOpen, setIsVoiceOpen] = useState(false);
-  const [isHabitsOpen, setIsHabitsOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [mobileTab, setMobileTab] = useState<'quick' | 'bigger' | 'projects' | 'habits'>('quick');
   const { panelStates, boardData, layoutMode, undo, lastUndoMessage, dismissUndoMessage } = useMomentum();
@@ -84,7 +82,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
         onOpenVoiceIngest={() => setIsVoiceOpen(true)}
         onOpenDoMode={onOpenDoMode}
         onOpenPlanMode={onOpenPlanMode}
-        onOpenHabits={() => setIsHabitsOpen(true)}
       />
 
       {/* Main Cockpit: Zero window scrolling, strictly locked to viewport */}
@@ -273,13 +270,6 @@ function CockpitDashboard({ onOpenDoMode, onOpenPlanMode }: { onOpenDoMode?: () 
 
       {isSettingsOpen && (
         <SettingsModal onClose={() => setIsSettingsOpen(false)} />
-      )}
-
-      {isHabitsOpen && (
-        <HabitsModal
-          isOpen={isHabitsOpen}
-          onClose={() => setIsHabitsOpen(false)}
-        />
       )}
     </div>
   );

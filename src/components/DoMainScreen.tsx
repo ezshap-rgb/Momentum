@@ -61,7 +61,6 @@ import {
 import { DoSideTaskList } from './focus/DoSideTaskList';
 import { DoSideHabitList } from './focus/DoSideHabitList';
 import { getNextOrderedQuickJobs } from '../services/taskOrder';
-import { HabitsModal } from './HabitsModal';
 import {
   getExperimentScheduleStatus,
   overrideExperimentMode,
@@ -94,7 +93,6 @@ import {
   Layers,
   ShieldCheck,
   Watch,
-  Activity,
 } from 'lucide-react';
 
 interface Props {
@@ -114,7 +112,6 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
   const [showParkingLot, setShowParkingLot] = useState(false);
   const [parkingLotText, setParkingLotText] = useState('');
   const [showWhyThisOne, setShowWhyThisOne] = useState(false);
-  const [showHabitsModal, setShowHabitsModal] = useState(false);
 
   // Doorway Config
   const [url, setUrl] = useState('');
@@ -952,16 +949,6 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <SyncIndicator />
 
-          {/* Habits Manager Button (Replaces Plan on top) */}
-          <button
-            onClick={() => setShowHabitsModal(true)}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 border border-pink-500/40 rounded-xl text-xs font-semibold text-pink-400 transition shadow-sm shrink-0"
-            title="Open Daily Habits Manager (Edit Quotas & Rhythms)"
-          >
-            <Activity className="w-3.5 h-3.5 text-pink-400" />
-            <span className="hidden sm:inline">Habits</span>
-          </button>
-
           <button
             onClick={onOpenTaskView}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition shadow-sm shrink-0"
@@ -1013,23 +1000,11 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
                   </span>
                 </button>
               </div>
-
-              {activeQuickTasks.length > 0 && (
-                <div className="mt-2 sm:mt-3 max-w-md w-full px-4 text-center truncate">
-                  <span className="text-[11px] text-slate-500">Up next: </span>
-                  <span className="text-[11px] text-slate-300/90 font-medium">
-                    {activeQuickTasks[0].title}
-                  </span>
-                </div>
-              )}
             </div>
 
-            {/* MIDDLE: Full-width Tasks list (tap to expand) */}
+            {/* MIDDLE: Passive full-width ordered Tasks list (tap to expand) */}
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <DoSideTaskList
-                tasks={activeQuickTasks}
-                onCompleteTask={toggleQuickJob}
-              />
+              <DoSideTaskList tasks={activeQuickTasks} />
             </div>
 
             {/* BOTTOM: Single-line horizontal scrolling Habits strip */}
@@ -1750,14 +1725,6 @@ export function DoMainScreen({ onOpenTaskView, onOpenPlanMode }: Props) {
             setShowFridaySummary(false);
             setShowCollectionModal(true);
           }}
-        />
-      )}
-
-      {/* Daily Habits Manager Modal */}
-      {showHabitsModal && (
-        <HabitsModal
-          isOpen={showHabitsModal}
-          onClose={() => setShowHabitsModal(false)}
         />
       )}
 

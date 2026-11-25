@@ -17,7 +17,6 @@ import {
   Undo2,
   Zap,
   Layers,
-  Activity,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -25,7 +24,6 @@ interface HeaderProps {
   onOpenVoiceIngest: () => void;
   onOpenDoMode?: () => void;
   onOpenPlanMode?: () => void;
-  onOpenHabits?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,7 +31,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVoiceIngest,
   onOpenDoMode,
   onOpenPlanMode,
-  onOpenHabits,
 }) => {
   const {
     settings,
@@ -139,18 +136,6 @@ export const Header: React.FC<HeaderProps> = ({
             <Zap className="w-3.5 h-3.5 fill-current" />
             <span>DO</span>
           </button>
-
-          {/* Habits Manager Button (Replaces Plan on top) */}
-          {onOpenHabits && (
-            <button
-              onClick={onOpenHabits}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-pink-600 dark:text-pink-400 border border-pink-500/30 transition shrink-0 active:scale-95"
-              title="Open Daily Habits Manager (Edit Quotas & Rhythms)"
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Habits</span>
-            </button>
-          )}
 
           {/* Prominent Google Tasks Sync Button (Visible everywhere) */}
           <button

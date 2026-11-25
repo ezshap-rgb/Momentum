@@ -8,7 +8,7 @@ interface Props {
 }
 
 /**
- * Single-line horizontally scrolling Habits bar on the DO screen.
+ * Single-line horizontally scrolling Habits strip on the DO screen.
  * Checking a habit logs it for today and clears it from the strip while keeping the template intact.
  */
 export function DoSideHabitList({ habits, onDismiss }: Props) {
@@ -27,20 +27,11 @@ export function DoSideHabitList({ habits, onDismiss }: Props) {
   return (
     <section
       aria-label="Daily habits"
-      className="bg-slate-900/50 border border-slate-800/70 rounded-2xl px-2.5 py-1.5 flex items-center gap-2 shrink-0 overflow-hidden backdrop-blur-xs"
+      className="bg-slate-900/50 border border-slate-800/70 rounded-2xl px-2 py-1.5 flex items-center shrink-0 overflow-hidden backdrop-blur-xs"
     >
-      <div className="flex items-center gap-1.5 shrink-0 pr-1 border-r border-slate-800/80">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Habits
-        </span>
-        <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-amber-500/10 text-amber-400/90 border border-amber-500/20">
-          {uncleared.length > 0 ? uncleared.length : '✓'}
-        </span>
-      </div>
-
       <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto flex-nowrap py-0.5">
         {uncleared.length === 0 ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 whitespace-nowrap px-1">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 whitespace-nowrap px-1.5">
             <Sparkles className="w-3.5 h-3.5 text-amber-400/70 shrink-0" />
             <span>All daily habits cleared ✨</span>
           </div>

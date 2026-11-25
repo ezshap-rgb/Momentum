@@ -26,6 +26,9 @@ export const QuickJobsPanel: React.FC = () => {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const pointerDragRef = useRef<{ pointerId: number; draggedId: string; overId: string } | null>(null);
+  const justDraggedRef = useRef(false);
 
   const level = panelStates.quick_jobs; // 'collapsed' | 'compact' | 'expanded'
 
@@ -53,6 +56,71 @@ export const QuickJobsPanel: React.FC = () => {
     }
     setDraggedId(null);
     setDragOverId(null);
+  };
+
+  const handleGripPointerDown = (e: React.PointerEvent<HTMLSpanElement>, taskId: string) => {
+    if (editingJobId === taskId) return;
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    pointerDragRef.current = { pointerId: e.pointerId, draggedId: taskId, overId: taskId };
+    setDraggedId(taskId);
+    setDragOverId(taskId);
+    if ('vibrate' in navigator) {
+      try { navigator.vibrate(15); } catch {}
+    }
+  };
+
+  const handleGripPointerMove = (e: React.PointerEvent<HTMLSpanElement>) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+
+    const scrollEl = listScrollRef.current;
+    if (scrollEl) {
+      const rect = scrollEl.getBoundingClientRect();
+      const edgeThreshold = 36;
+      if (e.clientY < rect.top + edgeThreshold) {
+        scrollEl.scrollTop -= 10;
+      } else if (e.clientY > rect.bottom - edgeThreshold) {
+        scrollEl.scrollTop += 10;
+      }
+    }
+
+    const hitEl = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-task-id]');
+    const targetId = hitEl?.dataset.taskId;
+    if (targetId && targetId !== drag.overId) {
+      drag.overId = targetId;
+      setDragOverId(targetId);
+    }
+  };
+
+  const handleGripPointerEnd = (e: React.PointerEvent<HTMLSpanElement>, commitReorder: boolean) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+
+    if (commitReorder && drag.overId && drag.overId !== drag.draggedId) {
+      const fromIdx = activeJobs.findIndex((j) => j.id === drag.draggedId);
+      const toIdx = activeJobs.findIndex((j) => j.id === drag.overId);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        moveByIndex(fromIdx, toIdx);
+      }
+    }
+
+    pointerDragRef.current = null;
+    setDraggedId(null);
+    setDragOverId(null);
+    justDraggedRef.current = true;
+    setTimeout(() => {
+      justDraggedRef.current = false;
+    }, 150);
   };
 
   const handleAdd = (e?: React.FormEvent) => {
@@ -168,7 +236,7 @@ export const QuickJobsPanel: React.FC = () => {
           </form>
 
           {/* Scrolling List */}
-          <div className="space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
+          <div ref={listScrollRef} className="space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
             {activeJobs.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-4 italic">
                 No tasks pending.
@@ -184,6 +252,7 @@ export const QuickJobsPanel: React.FC = () => {
               return (
                 <div
                   key={job.id}
+                  data-task-id={job.id}
                   draggable={!isEditing}
                   onDragStart={(e) => {
                     if (isEditing) return;
@@ -210,7 +279,7 @@ export const QuickJobsPanel: React.FC = () => {
                     setDragOverId(null);
                   }}
                   onClick={() => {
-                    if (!isEditing) {
+                    if (!isEditing && !justDraggedRef.current) {
                       setExpandedJobId(isExpanded ? null : job.id);
                     }
                   }}
@@ -280,8 +349,13 @@ export const QuickJobsPanel: React.FC = () => {
                       <div className="flex items-start gap-1.5 min-w-0 flex-1">
                         <span
                           onClick={(e) => e.stopPropagation()}
-                          className="mt-0.5 text-slate-300 dark:text-slate-600 group-hover:text-slate-500 dark:group-hover:text-slate-400 cursor-grab active:cursor-grabbing shrink-0 hidden sm:inline-flex"
+                          onPointerDown={(e) => handleGripPointerDown(e, job.id)}
+                          onPointerMove={handleGripPointerMove}
+                          onPointerUp={(e) => handleGripPointerEnd(e, true)}
+                          onPointerCancel={(e) => handleGripPointerEnd(e, false)}
+                          className="mt-0.5 inline-flex items-center justify-center p-1 -m-0.5 text-slate-400 hover:text-emerald-500 touch-none cursor-grab active:cursor-grabbing shrink-0 select-none"
                           title="Drag to reorder"
+                          aria-label={`Drag ${job.title} to reorder`}
                         >
                           <GripVertical className="w-3.5 h-3.5" />
                         </span>
